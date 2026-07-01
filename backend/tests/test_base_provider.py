@@ -1,6 +1,10 @@
 import pytest
 
-from backend.providers.base import BaseProvider
+from backend.providers.base import BaseProvider, ProviderError
+
+
+def test_provider_error_is_an_exception():
+    assert issubclass(ProviderError, Exception)
 
 
 def test_base_provider_cannot_be_instantiated_directly():

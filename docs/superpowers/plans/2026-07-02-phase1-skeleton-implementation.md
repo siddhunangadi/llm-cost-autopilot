@@ -1342,6 +1342,44 @@ git add backend/providers/base.py backend/tests/test_base_provider.py
 git commit -m "feat: add BaseProvider interface"
 ```
 
+- [ ] **Step 6 (addendum, bundled with Task 10): Add ProviderError**
+
+Concrete providers (starting with `OpenAIProvider`, Task 10) must translate
+SDK-specific exceptions into a provider-level type, so nothing outside
+`providers/` ever needs to import or catch a specific SDK's exception
+hierarchy -- only `BaseProvider`/`ProviderError` are part of the public
+contract.
+
+Add to `backend/tests/test_base_provider.py`:
+
+```python
+from backend.providers.base import ProviderError
+
+
+def test_provider_error_is_an_exception():
+    assert issubclass(ProviderError, Exception)
+```
+
+Add to `backend/providers/base.py` (after the imports, before `BaseProvider`):
+
+```python
+class ProviderError(Exception):
+    """Raised when a provider-level operation fails. Concrete providers
+    translate SDK/transport-specific exceptions into this type so callers
+    never need to know or catch a specific provider's SDK exception
+    hierarchy."""
+```
+
+Run: `uv run pytest backend/tests/test_base_provider.py -v`
+Expected: PASS (4 tests)
+
+Commit separately from Task 10 proper:
+
+```bash
+git add backend/providers/base.py backend/tests/test_base_provider.py
+git commit -m "feat: add ProviderError for translating SDK exceptions"
+```
+
 ---
 
 ### Task 9: MockProvider
@@ -1549,7 +1587,7 @@ git commit -m "feat: add MockProvider"
 - Test: `backend/tests/test_openai_provider.py`
 
 **Interfaces:**
-- Produces: `OpenAIProvider(BaseProvider)`, constructor `OpenAIProvider(settings: Settings)`, internal `self._client: AsyncOpenAI`, `name -> "openai"`. Consumed by `providers/factory.py` (Task 11).
+- Produces: `OpenAIProvider(BaseProvider)`, constructor `OpenAIProvider(settings: Settings, client: AsyncOpenAI | None = None)` (the `client` override exists only for this file's own tests -- no other module in the app ever passes it or imports `AsyncOpenAI`), internal `self._client: AsyncOpenAI`, `name -> "openai"`. `generate()`/`stream()` catch `openai.OpenAIError` and re-raise as `ProviderError` (Task 8 addendum) with the original exception chained via `from exc`; non-SDK exceptions (bugs) are not caught and propagate normally. `health_check()` already uses the cheap `models.list()` endpoint rather than a completion request, and keeps its existing broad `except Exception: return False` -- a health probe reports status, it doesn't raise. Consumed by `providers/factory.py` (Task 11).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1558,8 +1596,10 @@ git commit -m "feat: add MockProvider"
 from unittest.mock import AsyncMock
 
 import pytest
+from openai import OpenAIError
 
 from backend.config.settings import Settings
+from backend.providers.base import ProviderError
 from backend.providers.openai_provider import OpenAIProvider
 
 
@@ -1599,6 +1639,62 @@ async def test_generate_returns_completion_content(mocker):
 
     result = await provider.generate("hi", model="gpt-4o-mini")
     assert result == "hello world"
+
+
+async def test_generate_translates_openai_errors_into_provider_error(mocker):
+    provider = _make_provider()
+    mocker.patch.object(
+        provider._client.chat.completions,
+        "create",
+        new_callable=AsyncMock,
+        side_effect=OpenAIError("boom"),
+    )
+
+    with pytest.raises(ProviderError):
+        await provider.generate("hi", model="gpt-4o-mini")
+
+
+async def test_generate_error_preserves_original_exception_as_cause(mocker):
+    provider = _make_provider()
+    original = OpenAIError("boom")
+    mocker.patch.object(
+        provider._client.chat.completions,
+        "create",
+        new_callable=AsyncMock,
+        side_effect=original,
+    )
+
+    with pytest.raises(ProviderError) as exc_info:
+        await provider.generate("hi", model="gpt-4o-mini")
+
+    assert exc_info.value.__cause__ is original
+
+
+async def test_generate_does_not_swallow_non_openai_errors(mocker):
+    provider = _make_provider()
+    mocker.patch.object(
+        provider._client.chat.completions,
+        "create",
+        new_callable=AsyncMock,
+        side_effect=ValueError("unexpected bug"),
+    )
+
+    with pytest.raises(ValueError):
+        await provider.generate("hi", model="gpt-4o-mini")
+
+
+async def test_stream_translates_openai_errors_into_provider_error(mocker):
+    provider = _make_provider()
+    mocker.patch.object(
+        provider._client.chat.completions,
+        "create",
+        new_callable=AsyncMock,
+        side_effect=OpenAIError("boom"),
+    )
+
+    with pytest.raises(ProviderError):
+        async for _ in provider.stream("hi", model="gpt-4o-mini"):
+            pass
 
 
 async def test_health_check_true_when_models_list_succeeds(mocker):
@@ -1644,14 +1740,19 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'backend.providers.open
 # backend/providers/openai_provider.py
 from collections.abc import AsyncIterator
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAIError
 
 from backend.config.settings import Settings
-from backend.providers.base import BaseProvider
+from backend.providers.base import BaseProvider, ProviderError
 from backend.services.cost_estimator import calculate_linear_cost
 
 
 class OpenAIProvider(BaseProvider):
+    """Thin adapter over the OpenAI SDK. No retries, caching, logging
+    policy, budgeting, or failover -- those belong above this layer. The
+    OpenAI SDK types (AsyncOpenAI, OpenAIError) are used only within this
+    file; everything else in the app depends on BaseProvider/ProviderError."""
+
     def __init__(self, settings: Settings, client: AsyncOpenAI | None = None) -> None:
         self._client = client or AsyncOpenAI(api_key=settings.openai_api_key)
 
@@ -1660,24 +1761,33 @@ class OpenAIProvider(BaseProvider):
         return "openai"
 
     async def generate(self, prompt: str, model: str, **kwargs) -> str:
-        response = await self._client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        try:
+            response = await self._client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+            )
+        except OpenAIError as exc:
+            raise ProviderError(f"OpenAI generate failed: {exc}") from exc
         return response.choices[0].message.content or ""
 
     async def stream(self, prompt: str, model: str, **kwargs) -> AsyncIterator[str]:
-        stream = await self._client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            stream=True,
-        )
-        async for chunk in stream:
-            delta = chunk.choices[0].delta.content
-            if delta:
-                yield delta
+        try:
+            stream = await self._client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                stream=True,
+            )
+            async for chunk in stream:
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    yield delta
+        except OpenAIError as exc:
+            raise ProviderError(f"OpenAI stream failed: {exc}") from exc
 
     async def health_check(self) -> bool:
+        # Cheap connectivity probe (list models) rather than a completion
+        # request. A health probe reports status, it doesn't raise -- any
+        # failure here just means "not available", not a bug to propagate.
         try:
             await self._client.models.list()
             return True
@@ -1696,7 +1806,7 @@ class OpenAIProvider(BaseProvider):
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest backend/tests/test_openai_provider.py -v`
-Expected: PASS (6 tests)
+Expected: PASS (11 tests)
 
 - [ ] **Step 5: Commit**
 

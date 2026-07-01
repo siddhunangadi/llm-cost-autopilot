@@ -2,6 +2,13 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 
 
+class ProviderError(Exception):
+    """Raised when a provider-level operation fails. Concrete providers
+    translate SDK/transport-specific exceptions into this type so callers
+    never need to know or catch a specific provider's SDK exception
+    hierarchy."""
+
+
 class BaseProvider(ABC):
     """Common interface every LLM provider implementation must satisfy."""
 
