@@ -127,30 +127,91 @@ git commit -m "chore: project scaffold"
 - Test: `backend/tests/test_settings.py`
 
 **Interfaces:**
-- Produces: `Settings` (pydantic-settings `BaseSettings`) with fields `environment: str`, `log_level: str`, `database_url: str`, `models_yaml_path: str`, `openai_api_key: str | None`, `anthropic_api_key: str | None`. All other tasks construct `Settings(...)` directly (keyword overrides for tests) or `Settings()` (reads `.env`/env) in `main.py`.
+- Produces: `Settings` (pydantic-settings `BaseSettings`) with fields `environment: Literal["development", "test", "staging", "production"]`, `log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]`, `database_url: str` (min_length=1), `models_yaml_path: str` (min_length=1), `openai_api_key: str | None`, `anthropic_api_key: str | None`. Invalid/blank values raise `pydantic.ValidationError` at construction (fail-fast). Settings only carries `models_yaml_path` as a string — it does not read or validate YAML content; that responsibility belongs to `ModelRegistry` (Task 13). All other tasks construct `Settings(...)` directly (keyword overrides for tests) or `Settings()` (reads `.env`/env) in `main.py`.
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 # backend/tests/test_settings.py
+import pytest
+from pydantic import ValidationError
+
 from backend.config.settings import Settings
 
 
-def test_settings_defaults():
+def test_settings_successful_load_with_defaults():
     settings = Settings(_env_file=None)
     assert settings.environment == "development"
     assert settings.log_level == "INFO"
+    assert settings.database_url == "sqlite:///./llm_cost_autopilot.db"
+    assert settings.models_yaml_path == "backend/config/models.yaml"
     assert settings.openai_api_key is None
     assert settings.anthropic_api_key is None
 
 
-def test_settings_reads_env_overrides(monkeypatch):
+def test_settings_successful_load_with_explicit_values():
+    settings = Settings(
+        _env_file=None,
+        environment="production",
+        log_level="ERROR",
+        database_url="sqlite:///./prod.db",
+        models_yaml_path="config/models.yaml",
+        openai_api_key="sk-live",
+    )
+    assert settings.environment == "production"
+    assert settings.log_level == "ERROR"
+    assert settings.database_url == "sqlite:///./prod.db"
+    assert settings.models_yaml_path == "config/models.yaml"
+    assert settings.openai_api_key == "sk-live"
+
+
+def test_settings_rejects_invalid_environment():
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, environment="production-ish")
+
+
+def test_settings_rejects_invalid_log_level():
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, log_level="VERBOSE")
+
+
+def test_settings_rejects_blank_database_url():
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, database_url="")
+
+
+def test_settings_rejects_blank_models_yaml_path():
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, models_yaml_path="")
+
+
+def test_settings_optional_provider_keys_default_to_none_when_missing():
+    # Missing provider keys are intentionally not an error -- Phase 1 must
+    # work with zero provider keys configured (ProviderManager decides what
+    # "no key" means later, not Settings).
+    settings = Settings(_env_file=None)
+    assert settings.openai_api_key is None
+    assert settings.anthropic_api_key is None
+
+
+def test_settings_reads_env_var_overrides(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "test")
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
 
     settings = Settings(_env_file=None)
+
     assert settings.environment == "test"
-    assert settings.openai_api_key == "sk-test"
+    assert settings.log_level == "DEBUG"
+    assert settings.openai_api_key == "sk-from-env"
+
+
+def test_settings_models_yaml_path_is_a_plain_path_string_not_parsed():
+    # Settings only carries the path -- ModelRegistry (Task 13) owns reading
+    # and validating the YAML content itself, per the frozen design's split
+    # between config-loading and registry concerns.
+    settings = Settings(_env_file=None, models_yaml_path="some/nonexistent/models.yaml")
+    assert settings.models_yaml_path == "some/nonexistent/models.yaml"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -162,16 +223,19 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'backend.config.setting
 
 ```python
 # backend/config/settings.py
+from typing import Literal
+
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    environment: str = "development"
-    log_level: str = "INFO"
-    database_url: str = "sqlite:///./llm_cost_autopilot.db"
-    models_yaml_path: str = "backend/config/models.yaml"
+    environment: Literal["development", "test", "staging", "production"] = "development"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    database_url: str = Field(default="sqlite:///./llm_cost_autopilot.db", min_length=1)
+    models_yaml_path: str = Field(default="backend/config/models.yaml", min_length=1)
 
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
@@ -180,7 +244,7 @@ class Settings(BaseSettings):
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest backend/tests/test_settings.py -v`
-Expected: PASS (2 tests)
+Expected: PASS (9 tests)
 
 - [ ] **Step 5: Commit**
 
