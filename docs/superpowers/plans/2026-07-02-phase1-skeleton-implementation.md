@@ -2593,12 +2593,13 @@ git commit -m "feat: add ModelRegistry config loading and read API"
 
 **Interfaces:**
 - Consumes: `ModelRegistry` from Task 13, `KNOWN_PROVIDER_NAMES` from `providers/manager.py` (Task 12).
-- Produces: `ModelRegistry.refresh_provider_status() -> None` (async), `ModelRegistry.estimate_cost(model_id, input_tokens, output_tokens) -> float`. Consumed by `api/main.py` (Task 16).
+- Produces: `ModelRegistry.refresh_provider_status() -> None` (async), `ModelRegistry.estimate_cost(model_id, input_tokens, output_tokens) -> float`. `refresh_provider_status()` follows the exact same snapshot-then-swap pattern as `reload()`: it builds a whole new `dict[str, ModelSpec]` with updated `available` flags, then swaps `self._cache_data`/`self._cache` atomically at the end -- it never mutates individual cached `ModelSpec` entries in place. Readers always see either the pre-refresh or post-refresh snapshot, never a partially-updated one. `estimate_cost()` purely coordinates -- looks up the spec, delegates the actual formula to `self._cost_estimator` (`BaseCostEstimator`); no pricing math lives in `ModelRegistry` itself. Consumed by `api/main.py` (Task 16).
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 # backend/tests/test_model_registry_status.py
+from types import MappingProxyType
 from unittest.mock import AsyncMock
 
 import pytest
@@ -2634,6 +2635,23 @@ async def test_refresh_marks_model_unavailable_when_provider_unhealthy(tmp_path,
     await registry.refresh_provider_status()
 
     assert registry.get_models()[0].available is False
+
+
+async def test_refresh_preserves_cache_immutability(tmp_path, mocker):
+    registry = _make_registry(tmp_path, openai_key="sk-test")
+    registry.reload()
+
+    mocker.patch(
+        "backend.providers.openai_provider.OpenAIProvider.health_check",
+        new_callable=AsyncMock,
+        return_value=True,
+    )
+
+    await registry.refresh_provider_status()
+
+    assert isinstance(registry._cache, MappingProxyType)
+    with pytest.raises(TypeError):
+        registry._cache["gpt-4o-mini"] = None
 
 
 def test_estimate_cost(tmp_path):
@@ -2695,13 +2713,16 @@ Add these two methods to the `ModelRegistry` class (after `get_provider_models`)
 
             session.commit()
 
-        # Mutate the private backing dict, never self._cache (the
-        # read-only MappingProxyType view) -- assigning into self._cache
-        # directly would raise TypeError.
-        for spec_id, spec in list(self._cache_data.items()):
-            self._cache_data[spec_id] = spec.model_copy(
-                update={"available": self._is_available(spec.provider)}
-            )
+        # Same snapshot-then-swap pattern as reload(): build a whole new
+        # cache with updated availability, then swap the reference once.
+        # Never mutate individual ModelSpec entries in self._cache_data in
+        # place -- readers must always see a consistent snapshot.
+        updated_cache: dict[str, ModelSpec] = {
+            spec_id: spec.model_copy(update={"available": self._is_available(spec.provider)})
+            for spec_id, spec in self._cache_data.items()
+        }
+        self._cache_data = updated_cache
+        self._cache = MappingProxyType(self._cache_data)
 
     def estimate_cost(self, model_id: str, input_tokens: int, output_tokens: int) -> float:
         spec = self.get_model(model_id)
@@ -2713,7 +2734,7 @@ Add these two methods to the `ModelRegistry` class (after `get_provider_models`)
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest backend/tests/test_model_registry_status.py backend/tests/test_model_registry.py -v`
-Expected: PASS (7 tests total)
+Expected: PASS (14 tests total)
 
 - [ ] **Step 5: Commit**
 

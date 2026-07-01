@@ -1,15 +1,16 @@
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from types import MappingProxyType
 
 import yaml
 from pydantic import BaseModel
 from sqlalchemy.orm import sessionmaker
 
-from backend.database.models import ModelRow
+from backend.database.models import ModelRow, ProviderRow
 from backend.events.bus import EventBus
 from backend.events.types import EventType
-from backend.providers.manager import ProviderManager
+from backend.providers.manager import KNOWN_PROVIDER_NAMES, ProviderManager
 from backend.services.cost_estimator import BaseCostEstimator
 
 
@@ -181,3 +182,52 @@ class ModelRegistry(BaseRegistry):
 
     def get_provider_models(self, provider: str) -> list[ModelSpec]:
         return [spec for spec in self._cache.values() if spec.provider == provider]
+
+    async def refresh_provider_status(self) -> None:
+        with self._session_factory() as session:
+            for provider_name in KNOWN_PROVIDER_NAMES:
+                row = session.query(ProviderRow).filter_by(name=provider_name).one_or_none()
+                if row is None:
+                    row = ProviderRow(name=provider_name)
+                    session.add(row)
+
+                if not self._provider_manager.is_provider_available(provider_name):
+                    row.status = "disabled"
+                    row.last_error = None
+                    row.last_checked_at = datetime.now(timezone.utc)
+                    self._event_bus.emit(EventType.PROVIDER_DISABLED, {"provider": provider_name})
+                    continue
+
+                provider = self._provider_manager.get_provider(provider_name)
+                try:
+                    healthy = await provider.health_check()
+                    row.last_error = None
+                except Exception as exc:
+                    healthy = False
+                    row.last_error = str(exc)
+
+                self._provider_health[provider_name] = healthy
+                row.status = "available" if healthy else "error"
+                row.last_checked_at = datetime.now(timezone.utc)
+
+                event_type = EventType.PROVIDER_AVAILABLE if healthy else EventType.PROVIDER_FAILED
+                self._event_bus.emit(event_type, {"provider": provider_name, "status": row.status})
+
+            session.commit()
+
+        # Same snapshot-then-swap pattern as reload(): build a whole new
+        # cache with updated availability, then swap the reference once.
+        # Never mutate individual ModelSpec entries in self._cache_data in
+        # place -- readers must always see a consistent snapshot.
+        updated_cache: dict[str, ModelSpec] = {
+            spec_id: spec.model_copy(update={"available": self._is_available(spec.provider)})
+            for spec_id, spec in self._cache_data.items()
+        }
+        self._cache_data = updated_cache
+        self._cache = MappingProxyType(self._cache_data)
+
+    def estimate_cost(self, model_id: str, input_tokens: int, output_tokens: int) -> float:
+        spec = self.get_model(model_id)
+        return self._cost_estimator.estimate(
+            input_tokens, output_tokens, spec.input_cost, spec.output_cost
+        )
