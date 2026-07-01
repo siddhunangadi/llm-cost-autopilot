@@ -262,7 +262,7 @@ git commit -m "feat: add Settings via pydantic-settings"
 - Test: `backend/tests/test_cost_estimator.py`
 
 **Interfaces:**
-- Produces: `calculate_linear_cost(input_tokens: int, output_tokens: int, input_cost: float, output_cost: float) -> float` (pure function, per-million-token pricing), `BaseCostEstimator` (ABC with `estimate(...)`), `CostEstimator(BaseCostEstimator)`. Consumed by `providers/mock_provider.py`, `providers/openai_provider.py` (Tasks 9-10) and `services/model_registry.py` (Task 14).
+- Produces: `calculate_linear_cost(input_tokens: int, output_tokens: int, input_cost: float, output_cost: float) -> float` (pure function, per-million-token pricing, raises `ValueError` on negative token counts or negative pricing), `BaseCostEstimator` (ABC with `estimate(...)`), `DefaultCostEstimator(BaseCostEstimator)`. Consumed by `providers/mock_provider.py`, `providers/openai_provider.py` (Tasks 9-10) and `services/model_registry.py` (Task 14, constructed as `DefaultCostEstimator()`).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -270,22 +270,71 @@ git commit -m "feat: add Settings via pydantic-settings"
 # backend/tests/test_cost_estimator.py
 import pytest
 
-from backend.services.cost_estimator import CostEstimator, calculate_linear_cost
+from backend.services.cost_estimator import (
+    BaseCostEstimator,
+    DefaultCostEstimator,
+    calculate_linear_cost,
+)
 
 
-def test_calculate_linear_cost_at_one_million_tokens():
+def test_input_token_cost_only():
+    cost = calculate_linear_cost(input_tokens=1_000_000, output_tokens=0, input_cost=3.0, output_cost=15.0)
+    assert cost == pytest.approx(3.0)
+
+
+def test_output_token_cost_only():
+    cost = calculate_linear_cost(input_tokens=0, output_tokens=1_000_000, input_cost=3.0, output_cost=15.0)
+    assert cost == pytest.approx(15.0)
+
+
+def test_zero_tokens_costs_nothing():
+    assert calculate_linear_cost(0, 0, 1.0, 2.0) == 0.0
+
+
+def test_combined_input_and_output_cost():
     cost = calculate_linear_cost(1_000_000, 1_000_000, 1.0, 2.0)
     assert cost == pytest.approx(3.0)
 
 
-def test_calculate_linear_cost_zero_tokens():
-    assert calculate_linear_cost(0, 0, 1.0, 2.0) == 0.0
+def test_large_token_counts():
+    cost = calculate_linear_cost(
+        input_tokens=500_000_000, output_tokens=250_000_000, input_cost=0.15, output_cost=0.60
+    )
+    assert cost == pytest.approx(500 * 0.15 + 250 * 0.60)
 
 
-def test_cost_estimator_delegates_to_linear_formula():
-    estimator = CostEstimator()
+def test_decimal_precision_is_preserved():
+    cost = calculate_linear_cost(
+        input_tokens=333_333, output_tokens=666_667, input_cost=0.15, output_cost=0.60
+    )
+    expected = (333_333 / 1_000_000) * 0.15 + (666_667 / 1_000_000) * 0.60
+    assert cost == pytest.approx(expected, rel=1e-9)
+
+
+def test_negative_token_counts_raise_value_error():
+    with pytest.raises(ValueError):
+        calculate_linear_cost(-1, 0, 1.0, 2.0)
+
+
+def test_negative_pricing_raises_value_error():
+    with pytest.raises(ValueError):
+        calculate_linear_cost(1000, 1000, -1.0, 2.0)
+
+
+def test_default_cost_estimator_delegates_to_linear_formula():
+    estimator: BaseCostEstimator = DefaultCostEstimator()
     cost = estimator.estimate(500_000, 500_000, 2.0, 4.0)
     assert cost == pytest.approx(1.0 + 2.0)
+
+
+def test_default_cost_estimator_is_a_base_cost_estimator():
+    assert isinstance(DefaultCostEstimator(), BaseCostEstimator)
+
+
+# Note: "missing model" isn't a concept this module knows about --
+# calculate_linear_cost/DefaultCostEstimator operate on raw token counts
+# and pricing, not model lookups. Unknown-model-id handling belongs to
+# ModelRegistry.get_model (Task 13's test_get_model_unknown_raises).
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -304,6 +353,10 @@ def calculate_linear_cost(
     input_tokens: int, output_tokens: int, input_cost: float, output_cost: float
 ) -> float:
     """Cost in dollars given per-million-token pricing."""
+    if input_tokens < 0 or output_tokens < 0:
+        raise ValueError("token counts must not be negative")
+    if input_cost < 0 or output_cost < 0:
+        raise ValueError("pricing must not be negative")
     return (input_tokens / 1_000_000) * input_cost + (output_tokens / 1_000_000) * output_cost
 
 
@@ -314,7 +367,7 @@ class BaseCostEstimator(ABC):
     ) -> float: ...
 
 
-class CostEstimator(BaseCostEstimator):
+class DefaultCostEstimator(BaseCostEstimator):
     def estimate(
         self, input_tokens: int, output_tokens: int, input_cost: float, output_cost: float
     ) -> float:
@@ -324,13 +377,13 @@ class CostEstimator(BaseCostEstimator):
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest backend/tests/test_cost_estimator.py -v`
-Expected: PASS (3 tests)
+Expected: PASS (10 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add backend/services/cost_estimator.py backend/tests/test_cost_estimator.py
-git commit -m "feat: add BaseCostEstimator and linear cost formula"
+git commit -m "feat: add BaseCostEstimator/DefaultCostEstimator with fail-fast validation"
 ```
 
 ---
@@ -1445,7 +1498,7 @@ from backend.providers.factory import ProviderFactory
 from backend.providers.manager import ProviderManager
 from backend.providers.mock_provider import MockProvider
 from backend.providers.openai_provider import OpenAIProvider
-from backend.services.cost_estimator import CostEstimator
+from backend.services.cost_estimator import DefaultCostEstimator
 from backend.services.model_registry import ModelRegistry
 
 SAMPLE_YAML = textwrap.dedent("""
@@ -1487,7 +1540,7 @@ def _make_registry(tmp_path, openai_key):
     return ModelRegistry(
         provider_manager=provider_manager,
         event_bus=EventBus(),
-        cost_estimator=CostEstimator(),
+        cost_estimator=DefaultCostEstimator(),
         session_factory=session_factory,
         yaml_path=str(yaml_path),
     )
@@ -2158,7 +2211,7 @@ from backend.providers.factory import ProviderFactory
 from backend.providers.manager import ProviderManager
 from backend.providers.mock_provider import MockProvider
 from backend.providers.openai_provider import OpenAIProvider
-from backend.services.cost_estimator import CostEstimator
+from backend.services.cost_estimator import DefaultCostEstimator
 from backend.services.model_registry import ModelRegistry
 from backend.telemetry.logging import configure_logging
 
@@ -2187,7 +2240,7 @@ async def lifespan(app: FastAPI):
     model_registry = ModelRegistry(
         provider_manager=provider_manager,
         event_bus=event_bus,
-        cost_estimator=CostEstimator(),
+        cost_estimator=DefaultCostEstimator(),
         session_factory=session_factory,
         yaml_path=settings.models_yaml_path,
     )
