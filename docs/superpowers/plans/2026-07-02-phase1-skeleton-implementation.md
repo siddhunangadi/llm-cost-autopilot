@@ -3258,102 +3258,17 @@ git commit -m "feat: add GET /v1/models"
 
 - [ ] **Step 1: Write `README.md`**
 
-```markdown
-# LLM Cost Autopilot
-
-Phase 1: project skeleton, provider foundation, and event bus for an
-intelligent cost-aware LLM routing layer.
-
-## What exists today
-
-- `GET /v1/health` — service, database, and provider status
-- `GET /v1/models` — full model registry (pricing, limits, capabilities)
-- `ModelRegistry`, backed by `backend/config/models.yaml` and persisted to SQLite
-- `OpenAIProvider` and `MockProvider` behind a shared `BaseProvider` interface
-- In-process event bus (`PROVIDER_AVAILABLE`, `PROVIDER_DISABLED`, `PROVIDER_FAILED`, `MODEL_REGISTERED`)
-- Structured JSON logging to console and rotating file
-
-Routing, classification, verification, and the dashboard are not built yet
-— see `docs/superpowers/specs/` for the full roadmap.
-
-## Setup
-
-```bash
-uv sync
-cp .env.example .env   # add OPENAI_API_KEY to enable the OpenAI provider
-```
-
-## Run tests
-
-```bash
-uv run pytest
-```
-
-## Run the API
-
-```bash
-uv run uvicorn backend.api.main:app --reload
-```
-
-Then:
-
-```bash
-curl http://127.0.0.1:8000/v1/health
-curl http://127.0.0.1:8000/v1/models
-```
-```
+(Final content documents the actual shipped behavior, including
+refinements made during Tasks 9-17: `ProviderError` translation,
+`ProviderManager` graceful degradation, and the immutable/atomic
+`ModelRegistry` cache — see the committed `README.md` for the exact text.)
 
 - [ ] **Step 2: Write `docs/ARCHITECTURE.md`**
 
-```markdown
-# Architecture
-
-## Provider Layer
-
-`BaseProvider` defines `generate`, `stream`, `health_check`, `count_tokens`,
-and `estimate_cost`. `ProviderFactory` registers provider classes by name;
-`ProviderManager` builds one instance per provider that has the
-configuration it needs (`MockProvider` always, `OpenAIProvider` when
-`OPENAI_API_KEY` is set) and is the only source of truth for provider
-availability.
-
-## Registry
-
-`ModelRegistry` loads `backend/config/models.yaml`, validates it into
-`ModelSpec` objects, and keeps an in-memory cache that all reads go
-through. `reload()` re-reads YAML and upserts the `models` table.
-`refresh_provider_status()` pings each configured provider's
-`health_check()` and upserts the `providers` table — kept separate from
-`reload()` because one is a config concern and the other is a runtime
-concern.
-
-## Events
-
-An in-process, synchronous `EventBus` (`subscribe`/`emit`, no external
-broker). Phase 1 emits `PROVIDER_AVAILABLE`, `PROVIDER_DISABLED`,
-`PROVIDER_FAILED`, and `MODEL_REGISTERED`; a logging subscriber writes
-every event to the structured logger.
-
-## Routing
-
-_Not built yet — Phase 2._
-
-## Classification
-
-_Not built yet — Phase 3._
-
-## Verification
-
-_Not built yet — Phase 4._
-
-## Learning
-
-_Not built yet._
-
-## Dashboard
-
-_Not built yet._
-```
+(Final content adds Configuration, Database, Logging, and API sections
+beyond the original sketch, to cover Tasks 2, 7, 4, and 15-17 which
+weren't documented yet — see the committed `docs/ARCHITECTURE.md` for the
+exact text.)
 
 - [ ] **Step 3: Run the full test suite**
 
