@@ -1,0 +1,35 @@
+models:
+  - id: gpt-4o-mini
+    provider: openai
+    model: gpt-4o-mini
+    pricing:
+      input_cost: 0.15
+      output_cost: 0.60
+    limits:
+      context_window: 128000
+      max_output_tokens: 16384
+    capabilities:
+      supports_streaming: true
+      supports_tools: true
+      supports_json: true
+      supports_vision: false
+    metadata:
+      benchmark_score: 0.82
+      average_latency_ms: 450
+  - id: gpt-4o
+    provider: openai
+    model: gpt-4o
+    pricing:
+      input_cost: 2.50
+      output_cost: 10.00
+    limits:
+      context_window: 128000
+      max_output_tokens: 16384
+    capabilities:
+      supports_streaming: true
+      supports_tools: true
+      supports_json: true
+      supports_vision: true
+    metadata:
+      benchmark_score: 0.93
+      average_latency_ms: 900

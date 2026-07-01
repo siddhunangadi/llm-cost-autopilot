@@ -2109,7 +2109,7 @@ git commit -m "feat: add ProviderManager"
 - Test: `backend/tests/test_model_registry.py`
 
 **Interfaces:**
-- Produces: `ModelSpec` (Pydantic model with fields `id, provider, model, input_cost, output_cost, context_window, max_output_tokens, supports_streaming, supports_tools, supports_json, supports_vision, benchmark_score, average_latency_ms, available`), `BaseRegistry` ABC (`get_model, get_models, get_available_models, get_provider_models, reload`), `ModelRegistry(BaseRegistry)` constructor `ModelRegistry(provider_manager, event_bus, cost_estimator, session_factory, yaml_path)`, methods `reload() -> None`, `get_model(model_id) -> ModelSpec`, `get_models() -> list[ModelSpec]`, `get_available_models() -> list[ModelSpec]`, `get_provider_models(provider) -> list[ModelSpec]`. Consumed by `api/routers/models.py` (Task 17), `api/main.py` (Task 16). Task 14 extends this same file with `refresh_provider_status()` and `estimate_cost()`.
+- Produces: `ModelSpec` (Pydantic model with fields `id, provider, model, input_cost, output_cost, context_window, max_output_tokens, supports_streaming, supports_tools, supports_json, supports_vision, benchmark_score, average_latency_ms, available`), `BaseRegistry` ABC (`get_model, get_models, get_available_models, get_provider_models, reload`), `ModelRegistry(BaseRegistry)` constructor `ModelRegistry(provider_manager, event_bus, cost_estimator, session_factory, yaml_path)`, methods `reload() -> None`, `get_model(model_id) -> ModelSpec`, `get_models() -> list[ModelSpec]`, `get_available_models() -> list[ModelSpec]`, `get_provider_models(provider) -> list[ModelSpec]`. The in-memory cache is exposed only as a `types.MappingProxyType` read-only view (`self._cache`) over a private mutable dict (`self._cache_data`) -- nothing outside `ModelRegistry` can mutate registry state, even accidentally. `reload()` fails fast (raises before touching the DB or swapping the cache) on malformed YAML (`yaml.YAMLError`), invalid schema (`pydantic.ValidationError`), or duplicate model IDs (`ValueError`) -- a failed `reload()` always leaves the previous good cache and DB state untouched, it never partially applies. `models.yaml` remains the *only* place any module reads model config from -- `ModelRegistry` is the single source of truth for models, pricing, capabilities, availability, and metadata. Consumed by `api/routers/models.py` (Task 17), `api/main.py` (Task 16). Task 14 extends this same file with `refresh_provider_status()` and `estimate_cost()` -- note `refresh_provider_status()` must mutate `self._cache_data` (the private dict), never `self._cache` (the read-only proxy).
 
 - [ ] **Step 1: Write `backend/config/models.yaml`**
 
@@ -2156,8 +2156,11 @@ models:
 ```python
 # backend/tests/test_model_registry.py
 import textwrap
+from types import MappingProxyType
 
 import pytest
+import yaml as pyyaml
+from pydantic import ValidationError
 
 from backend.config.settings import Settings
 from backend.database.base import create_engine_from_settings, create_session_factory, init_db
@@ -2190,10 +2193,78 @@ SAMPLE_YAML = textwrap.dedent("""
           average_latency_ms: 450
 """)
 
+TWO_MODEL_YAML = textwrap.dedent("""
+    models:
+      - id: gpt-4o-mini
+        provider: openai
+        model: gpt-4o-mini
+        pricing:
+          input_cost: 0.15
+          output_cost: 0.60
+        limits:
+          context_window: 128000
+          max_output_tokens: 16384
+        capabilities:
+          supports_streaming: true
+          supports_tools: true
+          supports_json: true
+          supports_vision: false
+        metadata:
+          benchmark_score: 0.82
+          average_latency_ms: 450
+      - id: gpt-4o
+        provider: openai
+        model: gpt-4o
+        pricing:
+          input_cost: 2.50
+          output_cost: 10.00
+        limits:
+          context_window: 128000
+          max_output_tokens: 16384
+        capabilities:
+          supports_streaming: true
+          supports_tools: true
+          supports_json: true
+          supports_vision: true
+        metadata:
+          benchmark_score: 0.93
+          average_latency_ms: 900
+""")
 
-def _make_registry(tmp_path, openai_key):
+DUPLICATE_ID_YAML = textwrap.dedent("""
+    models:
+      - id: gpt-4o-mini
+        provider: openai
+        model: gpt-4o-mini
+        pricing: {input_cost: 0.15, output_cost: 0.60}
+        limits: {context_window: 128000, max_output_tokens: 16384}
+        capabilities: {supports_streaming: true, supports_tools: true, supports_json: true, supports_vision: false}
+        metadata: {benchmark_score: 0.82, average_latency_ms: 450}
+      - id: gpt-4o-mini
+        provider: openai
+        model: gpt-4o-mini
+        pricing: {input_cost: 0.15, output_cost: 0.60}
+        limits: {context_window: 128000, max_output_tokens: 16384}
+        capabilities: {supports_streaming: true, supports_tools: true, supports_json: true, supports_vision: false}
+        metadata: {benchmark_score: 0.82, average_latency_ms: 450}
+""")
+
+MISSING_PRICING_YAML = textwrap.dedent("""
+    models:
+      - id: broken-model
+        provider: openai
+        model: broken-model
+        limits: {context_window: 128000, max_output_tokens: 16384}
+        capabilities: {supports_streaming: true, supports_tools: true, supports_json: true, supports_vision: false}
+        metadata: {benchmark_score: 0.82, average_latency_ms: 450}
+""")
+
+INVALID_YAML = "models:\n\t- id: broken\n"
+
+
+def _make_registry(tmp_path, openai_key, yaml_text=SAMPLE_YAML):
     yaml_path = tmp_path / "models.yaml"
-    yaml_path.write_text(SAMPLE_YAML)
+    yaml_path.write_text(yaml_text)
 
     settings = Settings(
         _env_file=None, database_url=f"sqlite:///{tmp_path}/test.db", openai_api_key=openai_key
@@ -2248,6 +2319,62 @@ def test_get_provider_models(tmp_path):
 
     assert len(registry.get_provider_models("openai")) == 1
     assert registry.get_provider_models("anthropic") == []
+
+
+def test_cache_is_immutable_mapping_proxy_after_reload(tmp_path):
+    registry = _make_registry(tmp_path, openai_key="sk-test")
+    registry.reload()
+
+    assert isinstance(registry._cache, MappingProxyType)
+    with pytest.raises(TypeError):
+        registry._cache["gpt-4o-mini"] = None
+
+
+def test_reload_raises_on_duplicate_model_ids(tmp_path):
+    registry = _make_registry(tmp_path, openai_key="sk-test", yaml_text=DUPLICATE_ID_YAML)
+
+    with pytest.raises(ValueError):
+        registry.reload()
+
+
+def test_reload_raises_on_malformed_yaml(tmp_path):
+    registry = _make_registry(tmp_path, openai_key="sk-test", yaml_text=INVALID_YAML)
+
+    with pytest.raises(pyyaml.YAMLError):
+        registry.reload()
+
+
+def test_reload_raises_on_invalid_schema_missing_field(tmp_path):
+    registry = _make_registry(tmp_path, openai_key="sk-test", yaml_text=MISSING_PRICING_YAML)
+
+    with pytest.raises(ValidationError):
+        registry.reload()
+
+
+def test_reload_replaces_stale_cache_entries(tmp_path):
+    registry = _make_registry(tmp_path, openai_key="sk-test", yaml_text=TWO_MODEL_YAML)
+    registry.reload()
+    assert {m.id for m in registry.get_models()} == {"gpt-4o-mini", "gpt-4o"}
+
+    (tmp_path / "models.yaml").write_text(SAMPLE_YAML)
+    registry.reload()
+
+    assert {m.id for m in registry.get_models()} == {"gpt-4o-mini"}
+    with pytest.raises(KeyError):
+        registry.get_model("gpt-4o")
+
+
+def test_failed_reload_does_not_corrupt_existing_cache(tmp_path):
+    registry = _make_registry(tmp_path, openai_key="sk-test")
+    registry.reload()
+    assert len(registry.get_models()) == 1
+
+    (tmp_path / "models.yaml").write_text(INVALID_YAML)
+    with pytest.raises(pyyaml.YAMLError):
+        registry.reload()
+
+    assert len(registry.get_models()) == 1
+    assert registry.get_model("gpt-4o-mini") is not None
 ```
 
 - [ ] **Step 3: Run test to verify it fails**
@@ -2260,6 +2387,8 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'backend.services.model
 ```python
 # backend/services/model_registry.py
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
+from types import MappingProxyType
 
 import yaml
 from pydantic import BaseModel
@@ -2371,7 +2500,8 @@ class ModelRegistry(BaseRegistry):
         self._cost_estimator = cost_estimator
         self._session_factory = session_factory
         self._yaml_path = yaml_path
-        self._cache: dict[str, ModelSpec] = {}
+        self._cache_data: dict[str, ModelSpec] = {}
+        self._cache: Mapping[str, ModelSpec] = MappingProxyType(self._cache_data)
         self._provider_health: dict[str, bool] = {}
 
     def _is_available(self, provider: str) -> bool:
@@ -2384,6 +2514,13 @@ class ModelRegistry(BaseRegistry):
             raw = yaml.safe_load(f)
 
         entries = [_ModelYamlEntry.model_validate(item) for item in raw["models"]]
+
+        seen_ids: set[str] = set()
+        for entry in entries:
+            if entry.id in seen_ids:
+                raise ValueError(f"Duplicate model id in {self._yaml_path}: '{entry.id}'")
+            seen_ids.add(entry.id)
+
         cache: dict[str, ModelSpec] = {}
 
         with self._session_factory() as session:
@@ -2413,7 +2550,11 @@ class ModelRegistry(BaseRegistry):
 
             session.commit()
 
-        self._cache = cache
+        # Swap the whole cache atomically -- a failed reload (raised above,
+        # before this point) never partially applies, and stale entries
+        # removed from the YAML are dropped rather than lingering.
+        self._cache_data = cache
+        self._cache = MappingProxyType(self._cache_data)
 
     def get_model(self, model_id: str) -> ModelSpec:
         if model_id not in self._cache:
@@ -2433,7 +2574,7 @@ class ModelRegistry(BaseRegistry):
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `uv run pytest backend/tests/test_model_registry.py -v`
-Expected: PASS (4 tests)
+Expected: PASS (10 tests)
 
 - [ ] **Step 6: Commit**
 
@@ -2554,8 +2695,11 @@ Add these two methods to the `ModelRegistry` class (after `get_provider_models`)
 
             session.commit()
 
-        for spec_id, spec in list(self._cache.items()):
-            self._cache[spec_id] = spec.model_copy(
+        # Mutate the private backing dict, never self._cache (the
+        # read-only MappingProxyType view) -- assigning into self._cache
+        # directly would raise TypeError.
+        for spec_id, spec in list(self._cache_data.items()):
+            self._cache_data[spec_id] = spec.model_copy(
                 update={"available": self._is_available(spec.provider)}
             )
 
