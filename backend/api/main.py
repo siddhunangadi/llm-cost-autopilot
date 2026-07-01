@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from backend.api.routers.health import router as health_router
+from backend.api.routers.models import router as models_router
 from backend.config.settings import Settings
 from backend.database.base import create_engine_from_settings, create_session_factory, init_db
 from backend.events.bus import EventBus
@@ -65,6 +66,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(title="LLM Cost Autopilot", version=APP_VERSION, lifespan=lifespan)
     app.include_router(health_router, prefix="/v1")
+    app.include_router(models_router, prefix="/v1")
     return app
 
 

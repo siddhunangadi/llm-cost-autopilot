@@ -3134,7 +3134,7 @@ git commit -m "feat: add FastAPI app factory and GET /v1/health"
 
 **Interfaces:**
 - Consumes: `ModelRegistryDep` (Task 15), `ModelSpec` (Task 13).
-- Produces: `GET /v1/models` route returning a list of full `ModelSpec` dicts.
+- Produces: `GET /v1/models` route returning `list[ModelSpec]` directly -- no hand-picked dict reshaping. The registry already owns the canonical representation; the endpoint just exposes it via `response_model=list[ModelSpec]` and lets FastAPI serialize. (An earlier draft manually reconstructed a dict per field and silently dropped `spec.id` -- exactly the kind of bug hand-reshaping invites. Returning the model directly makes that class of bug structurally impossible and means new `ModelSpec` fields never require touching this endpoint.)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3181,8 +3181,19 @@ def test_list_models_returns_full_spec():
     assert response.status_code == 200
     body = response.json()
     assert len(body) == 1
+    assert body[0]["id"] == "gpt-4o-mini"
     assert body[0]["provider"] == "openai"
+    assert body[0]["model"] == "gpt-4o-mini"
+    assert body[0]["input_cost"] == 0.15
+    assert body[0]["output_cost"] == 0.60
+    assert body[0]["context_window"] == 128000
+    assert body[0]["max_output_tokens"] == 16384
+    assert body[0]["supports_streaming"] is True
+    assert body[0]["supports_tools"] is True
+    assert body[0]["supports_json"] is True
+    assert body[0]["supports_vision"] is False
     assert body[0]["benchmark_score"] == 0.82
+    assert body[0]["average_latency_ms"] == 450
     assert body[0]["available"] is True
 ```
 
@@ -3198,30 +3209,14 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'backend.api.routers.mo
 from fastapi import APIRouter
 
 from backend.api.dependencies import ModelRegistryDep
+from backend.services.model_registry import ModelSpec
 
 router = APIRouter()
 
 
-@router.get("/models")
-def list_models(model_registry: ModelRegistryDep):
-    return [
-        {
-            "provider": spec.provider,
-            "model": spec.model,
-            "available": spec.available,
-            "input_cost": spec.input_cost,
-            "output_cost": spec.output_cost,
-            "context_window": spec.context_window,
-            "max_output_tokens": spec.max_output_tokens,
-            "supports_streaming": spec.supports_streaming,
-            "supports_tools": spec.supports_tools,
-            "supports_json": spec.supports_json,
-            "supports_vision": spec.supports_vision,
-            "benchmark_score": spec.benchmark_score,
-            "average_latency_ms": spec.average_latency_ms,
-        }
-        for spec in model_registry.get_models()
-    ]
+@router.get("/models", response_model=list[ModelSpec])
+def list_models(model_registry: ModelRegistryDep) -> list[ModelSpec]:
+    return model_registry.get_models()
 ```
 
 - [ ] **Step 4: Modify `backend/api/main.py`**
