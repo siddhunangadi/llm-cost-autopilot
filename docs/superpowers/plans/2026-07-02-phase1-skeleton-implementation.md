@@ -1223,7 +1223,7 @@ git commit -m "feat: add SQLAlchemy providers and models tables"
 - Test: `backend/tests/test_base_provider.py`
 
 **Interfaces:**
-- Produces: `BaseProvider` ABC with abstract async `generate(prompt, model, **kwargs) -> str`, async `stream(prompt, model, **kwargs) -> AsyncIterator[str]`, async `health_check() -> bool`, sync `count_tokens(text) -> int`, sync `estimate_cost(input_tokens, output_tokens, input_cost, output_cost) -> float`. Consumed by `providers/mock_provider.py` (Task 9), `providers/openai_provider.py` (Task 10).
+- Produces: `BaseProvider` ABC with abstract property `name: str` (every provider must self-identify -- callers never infer identity from class name/type), abstract async `generate(prompt, model, **kwargs) -> str`, async `stream(prompt, model, **kwargs) -> AsyncIterator[str]`, async `health_check() -> bool`, sync `count_tokens(text) -> int`, sync `estimate_cost(input_tokens, output_tokens, input_cost, output_cost) -> float`. No retries, caching, rate limiting, or fallback logic -- those are out of scope for this interface. Consumed by `providers/mock_provider.py` (Task 9, `name -> "mock"`), `providers/openai_provider.py` (Task 10, `name -> "openai"`).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1240,6 +1240,10 @@ def test_base_provider_cannot_be_instantiated_directly():
 
 
 class _CompleteProvider(BaseProvider):
+    @property
+    def name(self) -> str:
+        return "complete"
+
     async def generate(self, prompt, model, **kwargs):
         return "ok"
 
@@ -1259,6 +1263,29 @@ class _CompleteProvider(BaseProvider):
 def test_complete_subclass_can_be_instantiated():
     provider = _CompleteProvider()
     assert isinstance(provider, BaseProvider)
+    assert provider.name == "complete"
+
+
+class _MissingNameProvider(BaseProvider):
+    async def generate(self, prompt, model, **kwargs):
+        return "ok"
+
+    async def stream(self, prompt, model, **kwargs):
+        yield "ok"
+
+    async def health_check(self):
+        return True
+
+    def count_tokens(self, text):
+        return 1
+
+    def estimate_cost(self, input_tokens, output_tokens, input_cost, output_cost):
+        return 0.0
+
+
+def test_subclass_missing_name_property_cannot_be_instantiated():
+    with pytest.raises(TypeError):
+        _MissingNameProvider()
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1276,6 +1303,14 @@ from collections.abc import AsyncIterator
 
 class BaseProvider(ABC):
     """Common interface every LLM provider implementation must satisfy."""
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Stable identifier for this provider (e.g. "openai", "mock").
+        Callers must never infer a provider's identity from its class name
+        or type -- this property is the single source of truth."""
+        ...
 
     @abstractmethod
     async def generate(self, prompt: str, model: str, **kwargs) -> str: ...
@@ -1298,7 +1333,7 @@ class BaseProvider(ABC):
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest backend/tests/test_base_provider.py -v`
-Expected: PASS (2 tests)
+Expected: PASS (3 tests)
 
 - [ ] **Step 5: Commit**
 
@@ -1316,7 +1351,7 @@ git commit -m "feat: add BaseProvider interface"
 - Test: `backend/tests/test_mock_provider.py`
 
 **Interfaces:**
-- Produces: `MockProvider(BaseProvider)`, constructor `MockProvider(settings: Settings | None = None)`. Consumed by `providers/factory.py` (Task 11).
+- Produces: `MockProvider(BaseProvider)`, constructor `MockProvider(settings: Settings | None = None)`, `name -> "mock"`. Consumed by `providers/factory.py` (Task 11).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1325,6 +1360,11 @@ git commit -m "feat: add BaseProvider interface"
 import pytest
 
 from backend.providers.mock_provider import MockProvider
+
+
+def test_name_is_mock():
+    provider = MockProvider()
+    assert provider.name == "mock"
 
 
 async def test_generate_is_deterministic_for_same_prompt():
@@ -1390,6 +1430,10 @@ class MockProvider(BaseProvider):
     def __init__(self, settings: Settings | None = None) -> None:
         pass
 
+    @property
+    def name(self) -> str:
+        return "mock"
+
     async def generate(self, prompt: str, model: str, **kwargs) -> str:
         digest = hashlib.sha256(prompt.encode()).hexdigest()[:8]
         return f"[mock:{model}] response-{digest}"
@@ -1415,7 +1459,7 @@ class MockProvider(BaseProvider):
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest backend/tests/test_mock_provider.py -v`
-Expected: PASS (6 tests)
+Expected: PASS (7 tests)
 
 - [ ] **Step 5: Commit**
 
@@ -1433,7 +1477,7 @@ git commit -m "feat: add MockProvider"
 - Test: `backend/tests/test_openai_provider.py`
 
 **Interfaces:**
-- Produces: `OpenAIProvider(BaseProvider)`, constructor `OpenAIProvider(settings: Settings)`, internal `self._client: AsyncOpenAI`. Consumed by `providers/factory.py` (Task 11).
+- Produces: `OpenAIProvider(BaseProvider)`, constructor `OpenAIProvider(settings: Settings)`, internal `self._client: AsyncOpenAI`, `name -> "openai"`. Consumed by `providers/factory.py` (Task 11).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1465,6 +1509,11 @@ class _FakeCompletion:
 def _make_provider():
     settings = Settings(_env_file=None, openai_api_key="sk-test")
     return OpenAIProvider(settings)
+
+
+def test_name_is_openai():
+    provider = _make_provider()
+    assert provider.name == "openai"
 
 
 async def test_generate_returns_completion_content(mocker):
@@ -1534,6 +1583,10 @@ class OpenAIProvider(BaseProvider):
     def __init__(self, settings: Settings, client: AsyncOpenAI | None = None) -> None:
         self._client = client or AsyncOpenAI(api_key=settings.openai_api_key)
 
+    @property
+    def name(self) -> str:
+        return "openai"
+
     async def generate(self, prompt: str, model: str, **kwargs) -> str:
         response = await self._client.chat.completions.create(
             model=model,
@@ -1571,7 +1624,7 @@ class OpenAIProvider(BaseProvider):
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest backend/tests/test_openai_provider.py -v`
-Expected: PASS (5 tests)
+Expected: PASS (6 tests)
 
 - [ ] **Step 5: Commit**
 
