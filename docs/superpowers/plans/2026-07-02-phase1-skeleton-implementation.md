@@ -1902,19 +1902,25 @@ git commit -m "feat: add ProviderFactory"
 - Test: `backend/tests/test_provider_manager.py`
 
 **Interfaces:**
-- Produces: `KNOWN_PROVIDER_NAMES = ("openai", "anthropic", "ollama")`, `ProviderManager` with constructor `ProviderManager(factory: ProviderFactory, settings: Settings)`, methods `get_provider(name) -> BaseProvider`, `is_provider_available(name) -> bool`, `list_providers() -> dict[str, str]`. Consumed by `services/model_registry.py` (Tasks 13-14), `api/main.py` (Task 16), `api/routers/health.py` (Task 16).
+- Produces: `KNOWN_PROVIDER_NAMES = ("openai", "anthropic", "ollama")`, `ProviderManager` with constructor `ProviderManager(factory: ProviderFactory, settings: Settings)`, methods `get_provider(name) -> BaseProvider`, `is_provider_available(name) -> bool`, `list_providers() -> dict[str, str]`. `mock` is mandatory -- if its construction fails, the exception propagates and crashes startup (no sensible degraded mode without it). Optional providers (currently just `openai`) have their construction wrapped in try/except: a failure is logged via `get_logger("providers")` (with the provider name attached through `request_context(provider=...)` so it lands in the structured `provider` field) and the provider is simply left out of `self._providers`, which `is_provider_available`/`list_providers` already report as `"disabled"` -- consistent with "missing providers auto-disable" from the top-level spec. No YAML parsing, no direct env var reads (uses already-validated `Settings`), no cost estimation, no routing, no retries, no response caching, no EventBus/business-event emission beyond this lifecycle log. Consumed by `services/model_registry.py` (Tasks 13-14), `api/main.py` (Task 16), `api/routers/health.py` (Task 16).
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 # backend/tests/test_provider_manager.py
+import io
+import json
+import logging
+
 import pytest
 
 from backend.config.settings import Settings
+from backend.providers.base import BaseProvider
 from backend.providers.factory import ProviderFactory
 from backend.providers.manager import ProviderManager
 from backend.providers.mock_provider import MockProvider
 from backend.providers.openai_provider import OpenAIProvider
+from backend.telemetry.logging import JsonFormatter
 
 
 def _make_factory():
@@ -1922,6 +1928,30 @@ def _make_factory():
     factory.register("mock", MockProvider)
     factory.register("openai", OpenAIProvider)
     return factory
+
+
+class _BrokenProvider(BaseProvider):
+    def __init__(self, settings):
+        raise RuntimeError("bad config")
+
+    @property
+    def name(self) -> str:
+        return "broken"
+
+    async def generate(self, prompt, model, **kwargs):
+        return ""
+
+    async def stream(self, prompt, model, **kwargs):
+        yield ""
+
+    async def health_check(self):
+        return False
+
+    def count_tokens(self, text):
+        return 0
+
+    def estimate_cost(self, input_tokens, output_tokens, input_cost, output_cost):
+        return 0.0
 
 
 def test_mock_provider_always_available():
@@ -1958,6 +1988,55 @@ def test_list_providers_covers_known_providers():
         "anthropic": "disabled",
         "ollama": "disabled",
     }
+
+
+def test_optional_provider_initialization_failure_is_recorded_as_unavailable():
+    factory = ProviderFactory()
+    factory.register("mock", MockProvider)
+    factory.register("openai", _BrokenProvider)
+
+    settings = Settings(_env_file=None, openai_api_key="sk-test")
+    manager = ProviderManager(factory, settings)
+
+    assert manager.is_provider_available("mock") is True
+    assert manager.is_provider_available("openai") is False
+    assert manager.list_providers()["openai"] == "disabled"
+
+
+def test_optional_provider_initialization_failure_is_logged():
+    factory = ProviderFactory()
+    factory.register("mock", MockProvider)
+    factory.register("openai", _BrokenProvider)
+
+    logger = logging.getLogger("providers")
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(JsonFormatter(service="llm-cost-autopilot", environment="test"))
+    logger.addHandler(handler)
+    logger.setLevel(logging.ERROR)
+    logger.propagate = False
+
+    settings = Settings(_env_file=None, openai_api_key="sk-test")
+    ProviderManager(factory, settings)
+
+    lines = [line for line in stream.getvalue().strip().splitlines() if line]
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["message"] == "provider_initialization_failed"
+    assert record["provider"] == "openai"
+    assert record["level"] == "ERROR"
+
+    logger.removeHandler(handler)
+
+
+def test_mandatory_mock_provider_initialization_failure_is_not_swallowed():
+    factory = ProviderFactory()
+    factory.register("mock", _BrokenProvider)
+
+    settings = Settings(_env_file=None)
+
+    with pytest.raises(RuntimeError):
+        ProviderManager(factory, settings)
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1972,16 +2051,26 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'backend.providers.mana
 from backend.config.settings import Settings
 from backend.providers.base import BaseProvider
 from backend.providers.factory import ProviderFactory
+from backend.telemetry.logging import get_logger, request_context
 
 KNOWN_PROVIDER_NAMES = ("openai", "anthropic", "ollama")
 
 
 class ProviderManager:
     def __init__(self, factory: ProviderFactory, settings: Settings) -> None:
+        self._logger = get_logger("providers")
+
+        # "mock" is mandatory -- if it fails to construct there is no
+        # sensible degraded mode, so the exception propagates and crashes
+        # startup rather than being swallowed here.
         self._providers: dict[str, BaseProvider] = {"mock": factory.create("mock", settings)}
 
         if settings.openai_api_key:
-            self._providers["openai"] = factory.create("openai", settings)
+            try:
+                self._providers["openai"] = factory.create("openai", settings)
+            except Exception:
+                with request_context(provider="openai"):
+                    self._logger.exception("provider_initialization_failed")
 
     def get_provider(self, name: str) -> BaseProvider:
         if name not in self._providers:
@@ -2001,7 +2090,7 @@ class ProviderManager:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest backend/tests/test_provider_manager.py -v`
-Expected: PASS (4 tests)
+Expected: PASS (7 tests)
 
 - [ ] **Step 5: Commit**
 
