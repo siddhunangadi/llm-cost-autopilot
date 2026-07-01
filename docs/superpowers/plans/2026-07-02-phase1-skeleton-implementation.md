@@ -779,6 +779,118 @@ git add backend/events/types.py backend/events/bus.py backend/tests/test_event_b
 git commit -m "feat: add in-process EventBus and EventType"
 ```
 
+- [ ] **Step 6 (refinement, bundled with Task 6): Add subscriber exception isolation**
+
+A subscriber that raises must not prevent other subscribers for the same
+event from running, and the failure must be logged via the centralized
+`get_logger()` (Task 4) rather than swallowed silently. This doesn't
+change `EventBus`'s public API (`subscribe`/`emit` signatures are
+unchanged).
+
+Add to `backend/tests/test_event_bus.py`:
+
+```python
+import io
+import json
+import logging
+
+from backend.telemetry.logging import JsonFormatter
+
+
+def test_subscriber_exception_does_not_prevent_other_subscribers():
+    bus = EventBus()
+    calls = []
+
+    def failing_handler(payload):
+        raise RuntimeError("boom")
+
+    def working_handler(payload):
+        calls.append("worked")
+
+    bus.subscribe(EventType.MODEL_REGISTERED, failing_handler)
+    bus.subscribe(EventType.MODEL_REGISTERED, working_handler)
+
+    bus.emit(EventType.MODEL_REGISTERED, {})
+
+    assert calls == ["worked"]
+
+
+def test_subscriber_exception_is_logged():
+    bus = EventBus()
+
+    logger = logging.getLogger("events")
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(JsonFormatter(service="llm-cost-autopilot", environment="test"))
+    logger.addHandler(handler)
+    logger.setLevel(logging.ERROR)
+    logger.propagate = False
+
+    def failing_handler(payload):
+        raise RuntimeError("boom")
+
+    bus.subscribe(EventType.MODEL_REGISTERED, failing_handler)
+    bus.emit(EventType.MODEL_REGISTERED, {})
+
+    lines = [line for line in stream.getvalue().strip().splitlines() if line]
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["message"] == "event_subscriber_failed"
+    assert record["level"] == "ERROR"
+
+    logger.removeHandler(handler)
+```
+
+Update `backend/events/bus.py`:
+
+```python
+# backend/events/bus.py
+from collections import defaultdict
+from typing import Callable
+
+from backend.events.types import EventType
+from backend.telemetry.logging import get_logger
+
+EventHandler = Callable[[dict], None]
+
+
+class EventBus:
+    """In-process, synchronous event bus for Phase 1.
+
+    No external broker (Redis/NATS/Kafka) is used. `emit` calls each
+    subscribed handler synchronously in registration order. A future
+    broker-backed implementation would preserve this subscribe/emit
+    interface. A subscriber that raises is logged and skipped -- it never
+    prevents other subscribers for the same event from running.
+    """
+
+    def __init__(self) -> None:
+        self._subscribers: dict[EventType, list[EventHandler]] = defaultdict(list)
+        self._logger = get_logger("events")
+
+    def subscribe(self, event_type: EventType, handler: EventHandler) -> None:
+        self._subscribers[event_type].append(handler)
+
+    def emit(self, event_type: EventType, payload: dict) -> None:
+        for handler in self._subscribers.get(event_type, []):
+            try:
+                handler(payload)
+            except Exception:
+                self._logger.exception(
+                    "event_subscriber_failed", extra={"event_type": event_type.value}
+                )
+```
+
+Run: `uv run pytest backend/tests/test_event_bus.py -v`
+Expected: PASS (5 tests)
+
+Commit separately from Task 6 proper:
+
+```bash
+git add backend/events/bus.py backend/tests/test_event_bus.py
+git commit -m "fix: isolate EventBus subscriber exceptions and log failures"
+```
+
 ---
 
 ### Task 6: Event Logging Subscriber
