@@ -395,39 +395,81 @@ git commit -m "feat: add BaseCostEstimator/DefaultCostEstimator with fail-fast v
 - Test: `backend/tests/test_logging.py`
 
 **Interfaces:**
-- Produces: `JsonFormatter` (logging.Formatter), `configure_logging(settings: Settings, log_dir: str = "logs") -> None`, `get_logger(component: str, settings: Settings) -> logging.LoggerAdapter`. Consumed by `events/subscribers.py` (Task 6) and `api/main.py` (Task 16).
+- Produces: `JsonFormatter(service, environment)` (logging.Formatter), `configure_logging(settings: Settings, log_dir: str = "logs") -> None`, `get_logger(component: str) -> logging.LoggerAdapter` (the **only** sanctioned way for application code to obtain a logger — never call `logging.getLogger()` directly outside this module), `request_context(**fields)` (context manager, `contextvars`-backed, isolated per asyncio task), `clear_request_context() -> None`, `get_request_context() -> dict`. Consumed by `events/subscribers.py` (Task 6, `get_logger("events")` — no `settings` arg) and `api/main.py` (Task 16, `configure_logging(settings)`).
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 # backend/tests/test_logging.py
+import asyncio
 import io
 import json
 import logging
 
+import pytest
+
 from backend.config.settings import Settings
-from backend.telemetry.logging import JsonFormatter, configure_logging, get_logger
+from backend.telemetry.logging import (
+    JsonFormatter,
+    clear_request_context,
+    configure_logging,
+    get_logger,
+    get_request_context,
+    request_context,
+)
 
 
-def test_get_logger_includes_required_fields():
-    settings = Settings(_env_file=None, environment="test")
-    logger = get_logger("test_component", settings)
-
+def _capture_logger(component: str) -> tuple[logging.LoggerAdapter, io.StringIO]:
+    adapter = get_logger(component)
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)
-    handler.setFormatter(JsonFormatter())
-    logger.logger.addHandler(handler)
-    logger.logger.setLevel(logging.INFO)
-    logger.logger.propagate = False
+    handler.setFormatter(JsonFormatter(service="llm-cost-autopilot", environment="test"))
+    adapter.logger.addHandler(handler)
+    adapter.logger.setLevel(logging.INFO)
+    adapter.logger.propagate = False
+    return adapter, stream
 
+
+def _read_last_record(stream: io.StringIO) -> dict:
+    lines = [line for line in stream.getvalue().strip().splitlines() if line]
+    return json.loads(lines[-1])
+
+
+def test_log_record_contains_all_required_fields():
+    logger, stream = _capture_logger("test_component")
     logger.info("hello")
 
-    record = json.loads(stream.getvalue().strip())
+    record = _read_last_record(stream)
+
+    for field in (
+        "timestamp", "level", "message", "service", "environment", "hostname",
+        "component", "request_id", "trace_id", "provider", "model",
+        "latency_ms", "cost_estimate",
+    ):
+        assert field in record
+
     assert record["message"] == "hello"
-    assert record["component"] == "test_component"
-    assert record["environment"] == "test"
+    assert record["level"] == "INFO"
     assert record["service"] == "llm-cost-autopilot"
+    assert record["environment"] == "test"
+    assert record["component"] == "test_component"
     assert record["hostname"]
+
+
+def test_json_output_is_valid_json():
+    logger, stream = _capture_logger("test_component")
+    logger.info("hello")
+
+    record = _read_last_record(stream)
+    assert isinstance(record, dict)
+
+
+def test_optional_request_fields_serialize_as_null_when_unset():
+    clear_request_context()
+    logger, stream = _capture_logger("test_component")
+    logger.info("hello")
+
+    record = _read_last_record(stream)
     assert record["request_id"] is None
     assert record["trace_id"] is None
     assert record["provider"] is None
@@ -436,14 +478,74 @@ def test_get_logger_includes_required_fields():
     assert record["cost_estimate"] is None
 
 
-def test_configure_logging_creates_log_dir_and_file(tmp_path):
+def test_request_context_sets_fields_on_log_records():
+    clear_request_context()
+    logger, stream = _capture_logger("test_component")
+
+    with request_context(request_id="req-1", trace_id="trace-1", provider="openai", model="gpt-4o-mini"):
+        logger.info("inside context")
+
+    record = _read_last_record(stream)
+    assert record["request_id"] == "req-1"
+    assert record["trace_id"] == "trace-1"
+    assert record["provider"] == "openai"
+    assert record["model"] == "gpt-4o-mini"
+
+
+def test_request_context_resets_after_block_exits():
+    clear_request_context()
+    logger, stream = _capture_logger("test_component")
+
+    with request_context(request_id="req-1"):
+        pass
+    logger.info("outside context")
+
+    record = _read_last_record(stream)
+    assert record["request_id"] is None
+
+
+def test_request_context_rejects_unknown_fields():
+    with pytest.raises(ValueError):
+        with request_context(not_a_real_field="oops"):
+            pass
+
+
+def test_clear_request_context_resets_to_defaults():
+    with request_context(request_id="req-1"):
+        clear_request_context()
+        assert get_request_context()["request_id"] is None
+
+
+async def test_context_isolation_between_concurrent_tasks():
+    results = {}
+
+    async def run(name, request_id):
+        with request_context(request_id=request_id):
+            await asyncio.sleep(0.01)
+            results[name] = get_request_context()["request_id"]
+
+    await asyncio.gather(run("a", "req-a"), run("b", "req-b"))
+
+    assert results == {"a": "req-a", "b": "req-b"}
+
+
+def test_configure_logging_creates_log_dir_and_writes_json_lines(tmp_path):
     settings = Settings(_env_file=None, environment="test")
     log_dir = str(tmp_path / "logs")
 
     configure_logging(settings, log_dir=log_dir)
     logging.getLogger("smoke").info("boot")
 
-    assert (tmp_path / "logs" / "app.log").exists()
+    log_file = tmp_path / "logs" / "app.log"
+    assert log_file.exists()
+    last_line = [line for line in log_file.read_text().strip().splitlines() if line][-1]
+    json.loads(last_line)
+
+
+def test_get_logger_returns_logger_adapter_with_component_bound():
+    logger = get_logger("my_component")
+    assert isinstance(logger, logging.LoggerAdapter)
+    assert logger.extra["component"] == "my_component"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -455,37 +557,79 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'backend.telemetry.logg
 
 ```python
 # backend/telemetry/logging.py
+import contextvars
 import json
 import logging
 import logging.handlers
 import socket
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from backend.config.settings import Settings
 
-_LOG_FIELDS = (
+_REQUEST_CONTEXT_FIELDS = (
     "request_id",
     "trace_id",
     "provider",
     "model",
     "latency_ms",
     "cost_estimate",
-    "component",
-    "environment",
-    "hostname",
-    "service",
+)
+
+_DEFAULT_REQUEST_CONTEXT: dict = {field: None for field in _REQUEST_CONTEXT_FIELDS}
+
+_request_context: contextvars.ContextVar[dict] = contextvars.ContextVar(
+    "request_context", default=_DEFAULT_REQUEST_CONTEXT
 )
 
 
+@contextmanager
+def request_context(**fields) -> Iterator[None]:
+    """Temporarily bind request-scoped fields onto every log record emitted
+    within this block. Backed by contextvars, so concurrent asyncio tasks
+    each see their own isolated copy -- one request's fields never leak
+    into another's log lines."""
+    unknown = set(fields) - set(_REQUEST_CONTEXT_FIELDS)
+    if unknown:
+        raise ValueError(f"Unknown request context field(s): {sorted(unknown)}")
+
+    merged = {**_request_context.get(), **fields}
+    token = _request_context.set(merged)
+    try:
+        yield
+    finally:
+        _request_context.reset(token)
+
+
+def clear_request_context() -> None:
+    _request_context.set(_DEFAULT_REQUEST_CONTEXT)
+
+
+def get_request_context() -> dict:
+    return dict(_request_context.get())
+
+
 class JsonFormatter(logging.Formatter):
+    def __init__(self, service: str, environment: str) -> None:
+        super().__init__()
+        self._service = service
+        self._environment = environment
+        self._hostname = socket.gethostname()
+
     def format(self, record: logging.LogRecord) -> str:
+        context = _request_context.get()
         payload = {
             "timestamp": self.formatTime(record, "%Y-%m-%dT%H:%M:%S%z"),
             "level": record.levelname,
             "message": record.getMessage(),
+            "service": self._service,
+            "environment": self._environment,
+            "hostname": self._hostname,
+            "component": getattr(record, "component", None),
         }
-        for field in _LOG_FIELDS:
-            payload[field] = getattr(record, field, None)
+        for field in _REQUEST_CONTEXT_FIELDS:
+            payload[field] = context.get(field)
         return json.dumps(payload)
 
 
@@ -495,7 +639,7 @@ def configure_logging(settings: Settings, log_dir: str = "logs") -> None:
     root.setLevel(settings.log_level)
     root.handlers.clear()
 
-    formatter = JsonFormatter()
+    formatter = JsonFormatter(service="llm-cost-autopilot", environment=settings.environment)
 
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
@@ -508,33 +652,24 @@ def configure_logging(settings: Settings, log_dir: str = "logs") -> None:
     root.addHandler(file_handler)
 
 
-def get_logger(component: str, settings: Settings) -> logging.LoggerAdapter:
-    base_logger = logging.getLogger(component)
-    extra = {
-        "component": component,
-        "environment": settings.environment,
-        "hostname": socket.gethostname(),
-        "service": "llm-cost-autopilot",
-        "request_id": None,
-        "trace_id": None,
-        "provider": None,
-        "model": None,
-        "latency_ms": None,
-        "cost_estimate": None,
-    }
-    return logging.LoggerAdapter(base_logger, extra)
+def get_logger(component: str) -> logging.LoggerAdapter:
+    """Centralized logger accessor. Application code must always go
+    through this instead of calling logging.getLogger() directly, so
+    every log line consistently carries `component` and merges the
+    request-scoped context fields via JsonFormatter."""
+    return logging.LoggerAdapter(logging.getLogger(component), {"component": component})
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest backend/tests/test_logging.py -v`
-Expected: PASS (2 tests)
+Expected: PASS (10 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add backend/telemetry/logging.py backend/tests/test_logging.py
-git commit -m "feat: add structured JSON logging with rotating file handler"
+git commit -m "feat: add structured JSON logging with contextvars request context"
 ```
 
 ---
@@ -653,7 +788,7 @@ git commit -m "feat: add in-process EventBus and EventType"
 - Test: `backend/tests/test_subscribers.py`
 
 **Interfaces:**
-- Produces: `register_logging_subscriber(event_bus: EventBus, settings: Settings) -> None`. Consumed by `api/main.py` (Task 16).
+- Produces: `register_logging_subscriber(event_bus: EventBus) -> None`. Consumed by `api/main.py` (Task 16). No longer takes `settings` — `get_logger()` (Task 4) doesn't need it either, since environment/service/hostname are baked into the `JsonFormatter` once by `configure_logging()`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -663,7 +798,6 @@ import io
 import json
 import logging
 
-from backend.config.settings import Settings
 from backend.events.bus import EventBus
 from backend.events.subscribers import register_logging_subscriber
 from backend.events.types import EventType
@@ -671,14 +805,13 @@ from backend.telemetry.logging import JsonFormatter
 
 
 def test_registered_subscriber_logs_every_event_type():
-    settings = Settings(_env_file=None, environment="test")
     bus = EventBus()
-    register_logging_subscriber(bus, settings)
+    register_logging_subscriber(bus)
 
     logger = logging.getLogger("events")
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)
-    handler.setFormatter(JsonFormatter())
+    handler.setFormatter(JsonFormatter(service="llm-cost-autopilot", environment="test"))
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
     logger.propagate = False
@@ -701,14 +834,13 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'backend.events.subscri
 
 ```python
 # backend/events/subscribers.py
-from backend.config.settings import Settings
 from backend.events.bus import EventBus
 from backend.events.types import EventType
 from backend.telemetry.logging import get_logger
 
 
-def register_logging_subscriber(event_bus: EventBus, settings: Settings) -> None:
-    logger = get_logger("events", settings)
+def register_logging_subscriber(event_bus: EventBus) -> None:
+    logger = get_logger("events")
 
     def handler(payload: dict) -> None:
         logger.info("event_emitted", extra={"payload": payload})
@@ -2231,7 +2363,7 @@ async def lifespan(app: FastAPI):
     configure_logging(settings)
 
     event_bus = EventBus()
-    register_logging_subscriber(event_bus, settings)
+    register_logging_subscriber(event_bus)
 
     session_factory = create_session_factory(settings)
 
