@@ -1351,12 +1351,14 @@ git commit -m "feat: add BaseProvider interface"
 - Test: `backend/tests/test_mock_provider.py`
 
 **Interfaces:**
-- Produces: `MockProvider(BaseProvider)`, constructor `MockProvider(settings: Settings | None = None)`, `name -> "mock"`. Consumed by `providers/factory.py` (Task 11).
+- Produces: `MockProvider(BaseProvider)`, constructor `MockProvider(settings: Settings | None = None, *, response: str | None = None, latency_ms: float = 0, input_tokens: int | None = None, output_tokens: int | None = None)`, `name -> "mock"`. Configurable per-instance: `response` overrides `generate()`/`stream()` output, `latency_ms` simulates delay, `input_tokens` overrides `count_tokens()`'s return for any text, `output_tokens` is exposed as a plain read-only attribute (`provider.output_tokens`) for tests that need a stable simulated output count without depending on generated response length -- `estimate_cost()` still uses its own explicit arguments per the `BaseProvider` contract, it does not silently substitute the configured `output_tokens`. All defaults preserve the original deterministic hash-based behavior. Consumed by `providers/factory.py` (Task 11).
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 # backend/tests/test_mock_provider.py
+import time
+
 import pytest
 
 from backend.providers.mock_provider import MockProvider
@@ -1400,10 +1402,50 @@ def test_count_tokens_is_positive():
     assert provider.count_tokens("hello world") > 0
 
 
+def test_default_count_tokens_uses_length_heuristic():
+    provider = MockProvider()
+    assert provider.count_tokens("hello world") == 2
+
+
 def test_estimate_cost_matches_linear_formula():
     provider = MockProvider()
     cost = provider.estimate_cost(1_000_000, 1_000_000, 1.0, 2.0)
     assert cost == pytest.approx(3.0)
+
+
+async def test_configured_response_overrides_default_generation():
+    provider = MockProvider(response="Hello")
+    result = await provider.generate("anything at all", model="mock-1")
+    assert result == "Hello"
+
+
+async def test_configured_response_also_overrides_stream():
+    provider = MockProvider(response="Hello there")
+    chunks = [chunk async for chunk in provider.stream("anything", model="mock-1")]
+    assert "".join(chunks).strip() == "Hello there"
+
+
+async def test_configured_latency_ms_delays_generate():
+    provider = MockProvider(latency_ms=20)
+    start = time.monotonic()
+    await provider.generate("hi", model="mock-1")
+    elapsed_ms = (time.monotonic() - start) * 1000
+    assert elapsed_ms >= 10
+
+
+def test_configured_input_tokens_overrides_count_tokens():
+    provider = MockProvider(input_tokens=5)
+    assert provider.count_tokens("literally any text, long or short") == 5
+
+
+def test_configured_output_tokens_is_exposed_as_attribute():
+    provider = MockProvider(output_tokens=7)
+    assert provider.output_tokens == 7
+
+
+def test_output_tokens_defaults_to_none_when_not_configured():
+    provider = MockProvider()
+    assert provider.output_tokens is None
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1415,6 +1457,7 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'backend.providers.mock
 
 ```python
 # backend/providers/mock_provider.py
+import asyncio
 import hashlib
 from collections.abc import AsyncIterator
 
@@ -1425,16 +1468,43 @@ from backend.services.cost_estimator import calculate_linear_cost
 
 class MockProvider(BaseProvider):
     """Deterministic provider with no network calls. Used in tests and as
-    a dev fallback when no real provider key is configured."""
+    a dev fallback when no real provider key is configured.
 
-    def __init__(self, settings: Settings | None = None) -> None:
-        pass
+    Configurable for tests that need specific behavior:
+    - response: fixed text returned by generate()/stream() instead of the
+      default deterministic hash-based response.
+    - latency_ms: simulated delay before generate()/stream() return.
+    - input_tokens: fixed value returned by count_tokens() for any text,
+      instead of the default length-based heuristic.
+    - output_tokens: exposed as a read-only attribute for tests that need
+      a stable simulated output token count without depending on
+      generated response length. Not consumed by estimate_cost(), which
+      always uses its own explicit arguments per the BaseProvider contract.
+    """
+
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        *,
+        response: str | None = None,
+        latency_ms: float = 0,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+    ) -> None:
+        self._response = response
+        self._latency_ms = latency_ms
+        self._input_tokens = input_tokens
+        self.output_tokens = output_tokens
 
     @property
     def name(self) -> str:
         return "mock"
 
     async def generate(self, prompt: str, model: str, **kwargs) -> str:
+        if self._latency_ms:
+            await asyncio.sleep(self._latency_ms / 1000)
+        if self._response is not None:
+            return self._response
         digest = hashlib.sha256(prompt.encode()).hexdigest()[:8]
         return f"[mock:{model}] response-{digest}"
 
@@ -1448,6 +1518,8 @@ class MockProvider(BaseProvider):
         return True
 
     def count_tokens(self, text: str) -> int:
+        if self._input_tokens is not None:
+            return self._input_tokens
         return max(1, len(text) // 4)
 
     def estimate_cost(
@@ -1459,7 +1531,7 @@ class MockProvider(BaseProvider):
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest backend/tests/test_mock_provider.py -v`
-Expected: PASS (7 tests)
+Expected: PASS (14 tests)
 
 - [ ] **Step 5: Commit**
 
