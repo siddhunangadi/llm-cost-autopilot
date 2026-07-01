@@ -1806,7 +1806,7 @@ class OpenAIProvider(BaseProvider):
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest backend/tests/test_openai_provider.py -v`
-Expected: PASS (11 tests)
+Expected: PASS (10 tests)
 
 - [ ] **Step 5: Commit**
 
