@@ -983,39 +983,82 @@ git commit -m "feat: log every emitted event via a logging subscriber"
 - Test: `backend/tests/test_database.py`
 
 **Interfaces:**
-- Produces: `Base` (SQLAlchemy `DeclarativeBase`), `create_session_factory(settings: Settings) -> sessionmaker`, `ProviderRow`, `ModelRow` ORM classes (tables `providers`, `models`). Consumed by `services/model_registry.py` (Tasks 13-14), `api/dependencies.py` (Task 15), `api/main.py` (Task 16).
+- Produces: `Base` (SQLAlchemy `DeclarativeBase`), `create_engine_from_settings(settings: Settings) -> Engine` (engine factory — no DDL, no tables touched), `init_db(engine: Engine) -> None` (issues `CREATE TABLE`, raises immediately on a bad connection — this is Phase 1's fail-fast-at-startup point), `create_session_factory(engine: Engine) -> sessionmaker` (session factory only, takes an engine, not settings), `ProviderRow`, `ModelRow` ORM classes (tables `providers`, `models`). Three separate single-purpose functions instead of one function that did engine+DDL+session-factory together, per explicit engine/session/model separation. Consumed by `services/model_registry.py` (Tasks 13-14, calls all three), `api/dependencies.py` (Task 15), `api/main.py` (Task 16, calls `create_engine_from_settings` then `init_db` then `create_session_factory` in that order at startup, with no try/except around any of them — a bad `DATABASE_URL` must crash startup, not degrade silently).
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 # backend/tests/test_database.py
+import pytest
+from sqlalchemy import inspect
+from sqlalchemy.exc import OperationalError
+
 from backend.config.settings import Settings
-from backend.database.base import create_session_factory
+from backend.database.base import create_engine_from_settings, create_session_factory, init_db
 from backend.database.models import ModelRow, ProviderRow
 
 
-def test_create_session_factory_creates_tables_and_allows_insert(tmp_path):
+def _sample_provider_row() -> ProviderRow:
+    return ProviderRow(name="openai", status="available")
+
+
+def _sample_model_row() -> ModelRow:
+    return ModelRow(
+        model_id="gpt-4o-mini",
+        provider="openai",
+        model_name="gpt-4o-mini",
+        input_cost=0.15,
+        output_cost=0.60,
+        context_window=128000,
+        benchmark_score=0.82,
+        supports_streaming=True,
+        supports_tools=True,
+        supports_json=True,
+        average_latency_ms=450,
+        available=True,
+    )
+
+
+def test_create_engine_from_settings_returns_a_bound_engine(tmp_path):
     settings = Settings(_env_file=None, database_url=f"sqlite:///{tmp_path}/test.db")
-    session_factory = create_session_factory(settings)
+    engine = create_engine_from_settings(settings)
+
+    assert str(engine.url) == settings.database_url
+
+
+def test_init_db_creates_providers_and_models_tables(tmp_path):
+    settings = Settings(_env_file=None, database_url=f"sqlite:///{tmp_path}/test.db")
+    engine = create_engine_from_settings(settings)
+
+    init_db(engine)
+
+    table_names = set(inspect(engine).get_table_names())
+    assert {"providers", "models"}.issubset(table_names)
+
+
+def test_session_factory_returns_a_new_session_each_call(tmp_path):
+    settings = Settings(_env_file=None, database_url=f"sqlite:///{tmp_path}/test.db")
+    engine = create_engine_from_settings(settings)
+    init_db(engine)
+    session_factory = create_session_factory(engine)
+
+    session_a = session_factory()
+    session_b = session_factory()
+
+    assert session_a is not session_b
+    session_a.close()
+    session_b.close()
+
+
+def test_crud_insert_and_query_provider_and_model_rows(tmp_path):
+    settings = Settings(_env_file=None, database_url=f"sqlite:///{tmp_path}/test.db")
+    engine = create_engine_from_settings(settings)
+    init_db(engine)
+    session_factory = create_session_factory(engine)
 
     with session_factory() as session:
-        session.add(ProviderRow(name="openai", status="available"))
-        session.add(
-            ModelRow(
-                model_id="gpt-4o-mini",
-                provider="openai",
-                model_name="gpt-4o-mini",
-                input_cost=0.15,
-                output_cost=0.60,
-                context_window=128000,
-                benchmark_score=0.82,
-                supports_streaming=True,
-                supports_tools=True,
-                supports_json=True,
-                average_latency_ms=450,
-                available=True,
-            )
-        )
+        session.add(_sample_provider_row())
+        session.add(_sample_model_row())
         session.commit()
 
     with session_factory() as session:
@@ -1024,6 +1067,56 @@ def test_create_session_factory_creates_tables_and_allows_insert(tmp_path):
 
     assert provider_row.status == "available"
     assert model_row.benchmark_score == 0.82
+
+
+def test_crud_update_and_delete_provider_row(tmp_path):
+    settings = Settings(_env_file=None, database_url=f"sqlite:///{tmp_path}/test.db")
+    engine = create_engine_from_settings(settings)
+    init_db(engine)
+    session_factory = create_session_factory(engine)
+
+    with session_factory() as session:
+        session.add(_sample_provider_row())
+        session.commit()
+
+    with session_factory() as session:
+        row = session.query(ProviderRow).filter_by(name="openai").one()
+        row.status = "disabled"
+        session.commit()
+
+    with session_factory() as session:
+        row = session.query(ProviderRow).filter_by(name="openai").one()
+        assert row.status == "disabled"
+        session.delete(row)
+        session.commit()
+
+    with session_factory() as session:
+        assert session.query(ProviderRow).filter_by(name="openai").one_or_none() is None
+
+
+def test_rollback_discards_uncommitted_changes(tmp_path):
+    settings = Settings(_env_file=None, database_url=f"sqlite:///{tmp_path}/test.db")
+    engine = create_engine_from_settings(settings)
+    init_db(engine)
+    session_factory = create_session_factory(engine)
+
+    with session_factory() as session:
+        session.add(_sample_provider_row())
+        session.flush()
+        session.rollback()
+
+    with session_factory() as session:
+        assert session.query(ProviderRow).filter_by(name="openai").one_or_none() is None
+
+
+def test_init_db_fails_fast_on_unwritable_database_path():
+    settings = Settings(
+        _env_file=None, database_url="sqlite:////nonexistent-directory-xyz/test.db"
+    )
+    engine = create_engine_from_settings(settings)
+
+    with pytest.raises(OperationalError):
+        init_db(engine)
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1036,6 +1129,7 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'backend.database.base'
 ```python
 # backend/database/base.py
 from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from backend.config.settings import Settings
@@ -1045,12 +1139,18 @@ class Base(DeclarativeBase):
     pass
 
 
-def create_session_factory(settings: Settings) -> sessionmaker[Session]:
+def create_engine_from_settings(settings: Settings) -> Engine:
     connect_args = (
         {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
     )
-    engine = create_engine(settings.database_url, connect_args=connect_args)
+    return create_engine(settings.database_url, connect_args=connect_args)
+
+
+def init_db(engine: Engine) -> None:
     Base.metadata.create_all(engine)
+
+
+def create_session_factory(engine: Engine) -> sessionmaker[Session]:
     return sessionmaker(bind=engine, expire_on_commit=False)
 ```
 
@@ -1105,7 +1205,7 @@ class ModelRow(Base):
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest backend/tests/test_database.py -v`
-Expected: PASS (1 test)
+Expected: PASS (7 tests)
 
 - [ ] **Step 5: Commit**
 
@@ -1736,7 +1836,7 @@ import textwrap
 import pytest
 
 from backend.config.settings import Settings
-from backend.database.base import create_session_factory
+from backend.database.base import create_engine_from_settings, create_session_factory, init_db
 from backend.events.bus import EventBus
 from backend.providers.factory import ProviderFactory
 from backend.providers.manager import ProviderManager
@@ -1774,7 +1874,9 @@ def _make_registry(tmp_path, openai_key):
     settings = Settings(
         _env_file=None, database_url=f"sqlite:///{tmp_path}/test.db", openai_api_key=openai_key
     )
-    session_factory = create_session_factory(settings)
+    engine = create_engine_from_settings(settings)
+    init_db(engine)
+    session_factory = create_session_factory(engine)
 
     factory = ProviderFactory()
     factory.register("mock", MockProvider)
@@ -2339,7 +2441,7 @@ from backend.api.dependencies import (
 )
 from backend.api.routers.health import router as health_router
 from backend.config.settings import Settings
-from backend.database.base import create_session_factory
+from backend.database.base import create_engine_from_settings, create_session_factory, init_db
 
 
 class _FakeProviderManager:
@@ -2357,7 +2459,9 @@ def test_health_endpoint_returns_expected_shape(tmp_path):
     app.include_router(health_router, prefix="/v1")
 
     settings = Settings(_env_file=None, environment="test", database_url=f"sqlite:///{tmp_path}/t.db")
-    session_factory = create_session_factory(settings)
+    engine = create_engine_from_settings(settings)
+    init_db(engine)
+    session_factory = create_session_factory(engine)
 
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_app_version] = lambda: "0.1.0"
@@ -2448,7 +2552,7 @@ from fastapi import FastAPI
 
 from backend.api.routers.health import router as health_router
 from backend.config.settings import Settings
-from backend.database.base import create_session_factory
+from backend.database.base import create_engine_from_settings, create_session_factory, init_db
 from backend.events.bus import EventBus
 from backend.events.subscribers import register_logging_subscriber
 from backend.providers.factory import ProviderFactory
@@ -2477,7 +2581,10 @@ async def lifespan(app: FastAPI):
     event_bus = EventBus()
     register_logging_subscriber(event_bus)
 
-    session_factory = create_session_factory(settings)
+    # No try/except around DB init: a bad DATABASE_URL must crash startup.
+    engine = create_engine_from_settings(settings)
+    init_db(engine)
+    session_factory = create_session_factory(engine)
 
     provider_manager = ProviderManager(_build_provider_factory(), settings)
 
