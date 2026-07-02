@@ -87,3 +87,13 @@ def test_settings_routing_config_path_default():
 def test_settings_rejects_blank_routing_config_path():
     with pytest.raises(ValidationError):
         Settings(_env_file=None, routing_config_path="")
+
+
+def test_settings_verification_config_path_default():
+    settings = Settings(_env_file=None)
+    assert settings.verification_config_path == "backend/config/verification.yaml"
+
+
+def test_settings_rejects_blank_verification_config_path():
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, verification_config_path="")
