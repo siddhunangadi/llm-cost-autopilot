@@ -44,7 +44,7 @@ async def dashboard_fragment(
 
     window = TimeWindow(days=days)
     if section == "overview":
-        data = await dashboard_service.get_overview_fragment(window)
+        data = {"overview": await dashboard_service.get_overview_fragment(window)}
     elif section == "providers":
         data = await dashboard_service.get_provider_fragment()
     elif section == "circuits":
