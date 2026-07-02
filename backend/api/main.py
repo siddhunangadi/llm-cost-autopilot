@@ -6,7 +6,9 @@ from fastapi import FastAPI
 from backend.analysis.prompt_analyzer import PromptAnalyzer
 from backend.api.routers.chat import router as chat_router
 from backend.api.routers.health import router as health_router
+from backend.api.routers.metrics import router as metrics_router
 from backend.api.routers.models import router as models_router
+from backend.api.routers.verification import router as verification_router
 from backend.chat.service import ChatService
 from backend.classifier.complexity_classifier import HeuristicComplexityClassifier
 from backend.config.settings import Settings
@@ -29,9 +31,27 @@ from backend.routing.strategies import (
 )
 from backend.services.cost_estimator import DefaultCostEstimator
 from backend.services.model_registry import ModelRegistry
-from backend.telemetry.logging import configure_logging
+from backend.telemetry.logging import configure_logging, get_logger
+from backend.verification.config_loader import VerificationConfigLoader
+from backend.verification.engine import JudgeEngine
+from backend.verification.judge import BaseJudge, JudgeVerdict, LLMJudge
+from backend.verification.service import VerificationService
 
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.3.0"
+
+
+class _UnavailableJudge(BaseJudge):
+    """Fallback judge used when the configured judge model's provider
+    cannot be resolved at startup (e.g. missing API key). Every
+    verification attempt fails cleanly through VerificationService's
+    existing exception handling (-> FAILED, never raised to the caller)
+    instead of crashing app startup entirely."""
+
+    def __init__(self, reason: str) -> None:
+        self._reason = reason
+
+    async def evaluate(self, prompt: str, response: str) -> JudgeVerdict:
+        raise RuntimeError(self._reason)
 
 
 def _build_provider_factory() -> ProviderFactory:
@@ -83,11 +103,39 @@ async def lifespan(app: FastAPI):
         strategies=strategies,
         explanation_generator=ExplanationGenerator(),
     )
+    verification_config = VerificationConfigLoader.load(settings.verification_config_path)
+    try:
+        judge_provider = provider_manager.get_provider(
+            model_registry.get_model(verification_config.judge_model_id).provider
+        )
+        judge: BaseJudge = LLMJudge(
+            provider=judge_provider,
+            model=verification_config.judge_model_id,
+            pass_threshold=verification_config.pass_threshold,
+        )
+    except Exception as exc:
+        # The judge model's provider may be unavailable (e.g. no API key
+        # configured) at startup. Verification is a best-effort side
+        # effect of /v1/chat, never a prerequisite for it -- the app must
+        # still boot and serve chat requests. Every verification attempt
+        # will fail cleanly (FAILED status) via VerificationService's
+        # own exception handling rather than crashing startup here.
+        get_logger("verification").exception("judge_provider_unavailable_at_startup")
+        judge = _UnavailableJudge(reason=str(exc))
+    judge_engine = JudgeEngine(judge=judge, judge_model_id=verification_config.judge_model_id)
+    verification_service = VerificationService(
+        judge_engine=judge_engine,
+        session_factory=session_factory,
+        event_bus=event_bus,
+        judge_prompt_version=verification_config.judge_prompt_version,
+    )
+
     chat_service = ChatService(
         routing_engine=routing_engine,
         provider_manager=provider_manager,
         model_registry=model_registry,
         session_factory=session_factory,
+        verification_service=verification_service,
     )
 
     app.state.settings = settings
@@ -107,6 +155,8 @@ def create_app() -> FastAPI:
     app.include_router(health_router, prefix="/v1")
     app.include_router(models_router, prefix="/v1")
     app.include_router(chat_router, prefix="/v1")
+    app.include_router(verification_router, prefix="/v1")
+    app.include_router(metrics_router, prefix="/v1")
     return app
 
 

@@ -117,3 +117,47 @@ curl -X POST http://127.0.0.1:8000/v1/chat \
   }
 }
 ```
+
+### Phase 3: Quality Verification
+
+Every `/v1/chat` call schedules an in-process, best-effort background
+task that scores the response with an LLM-as-judge and persists the
+verdict — this never adds latency to `/v1/chat` or risks its
+availability. Poll the result once it completes:
+
+```bash
+curl http://127.0.0.1:8000/v1/chat/<request_id>/verification
+```
+
+```json
+{
+  "request_id": "b3f1...",
+  "status": "completed",
+  "score": 0.9,
+  "passed": true,
+  "confidence": 0.9,
+  "rationale": "The response correctly and completely answers the prompt.",
+  "dimensions": {
+    "correctness": 0.9,
+    "completeness": 0.9,
+    "instruction_following": 0.9,
+    "format_adherence": 0.9
+  },
+  "judge_model": "gpt-4o",
+  "judge_prompt_version": "v1",
+  "evaluation_duration_ms": 812,
+  "error_type": null,
+  "error": null,
+  "created_at": "2026-07-02T05:10:00Z",
+  "started_at": "2026-07-02T05:10:00Z",
+  "completed_at": "2026-07-02T05:10:01Z"
+}
+```
+
+`GET /v1/metrics/quality` aggregates every completed/failed verification
+(average score, pass rate, timing, and per-model / per-strategy /
+per-complexity breakdowns):
+
+```bash
+curl http://127.0.0.1:8000/v1/metrics/quality
+```

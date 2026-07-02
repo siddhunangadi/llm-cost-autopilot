@@ -1,6 +1,6 @@
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
 from backend.api.dependencies import ChatServiceDep
@@ -17,9 +17,13 @@ class ChatRequest(BaseModel):
 
 
 @router.post("/chat", response_model=ChatResult)
-async def chat(request: ChatRequest, chat_service: ChatServiceDep) -> ChatResult:
+async def chat(
+    request: ChatRequest, chat_service: ChatServiceDep, background_tasks: BackgroundTasks
+) -> ChatResult:
     try:
-        return await chat_service.chat(request.prompt, strategy=request.strategy)
+        return await chat_service.chat(
+            request.prompt, strategy=request.strategy, background_tasks=background_tasks
+        )
     except NoEligibleModelError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ProviderError as exc:

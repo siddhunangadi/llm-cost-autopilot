@@ -14,7 +14,7 @@ class _FakeChatService:
         self._result = result
         self._exception = exception
 
-    async def chat(self, prompt, strategy="balanced"):
+    async def chat(self, prompt, strategy="balanced", background_tasks=None):
         if self._exception:
             raise self._exception
         return self._result

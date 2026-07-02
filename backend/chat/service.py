@@ -1,6 +1,7 @@
 import json
 import uuid
 
+from fastapi import BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.orm import sessionmaker
 
@@ -9,6 +10,8 @@ from backend.providers.base import ProviderError
 from backend.providers.manager import ProviderManager
 from backend.routing.engine import RoutingDecision, RoutingEngine
 from backend.services.model_registry import ModelRegistry
+from backend.telemetry.logging import get_logger
+from backend.verification.service import VerificationService
 
 
 class ChatResult(BaseModel):
@@ -24,13 +27,18 @@ class ChatService:
         provider_manager: ProviderManager,
         model_registry: ModelRegistry,
         session_factory: sessionmaker,
+        verification_service: VerificationService,
     ) -> None:
         self._routing_engine = routing_engine
         self._provider_manager = provider_manager
         self._model_registry = model_registry
         self._session_factory = session_factory
+        self._verification_service = verification_service
+        self._logger = get_logger("chat")
 
-    async def chat(self, prompt: str, strategy: str = "balanced") -> ChatResult:
+    async def chat(
+        self, prompt: str, strategy: str, background_tasks: BackgroundTasks
+    ) -> ChatResult:
         request_id = str(uuid.uuid4())
         decision = self._routing_engine.route(prompt, strategy_name=strategy)
 
@@ -72,5 +80,14 @@ class ChatService:
                 actual_cost=actual_cost,
             ))
             session.commit()
+
+        try:
+            background_tasks.add_task(
+                self._verification_service.verify, request_id, prompt, response_text
+            )
+        except Exception:
+            self._logger.exception(
+                "verification_scheduling_failed", extra={"request_id": request_id}
+            )
 
         return ChatResult(request_id=request_id, response=response_text, routing=decision)

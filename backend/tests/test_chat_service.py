@@ -3,6 +3,7 @@ import textwrap
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import BackgroundTasks
 
 from backend.analysis.prompt_analyzer import PromptAnalyzer
 from backend.chat.service import ChatService
@@ -22,6 +23,9 @@ from backend.routing.policy import RoutingPolicy
 from backend.routing.strategies import BalancedStrategy
 from backend.services.cost_estimator import DefaultCostEstimator
 from backend.services.model_registry import ModelRegistry
+from backend.verification.engine import JudgeEngine
+from backend.verification.judge import LLMJudge
+from backend.verification.service import VerificationService
 
 ONE_MODEL_YAML = textwrap.dedent("""
     models:
@@ -45,7 +49,12 @@ ONE_MODEL_YAML = textwrap.dedent("""
 """)
 
 
-def _make_chat_service(tmp_path):
+class _FailingVerificationService:
+    async def verify(self, request_id, prompt, response):
+        raise RuntimeError("verification exploded")
+
+
+def _make_chat_service(tmp_path, verification_service=None):
     yaml_path = tmp_path / "models.yaml"
     yaml_path.write_text(ONE_MODEL_YAML)
 
@@ -80,11 +89,20 @@ def _make_chat_service(tmp_path):
         explanation_generator=ExplanationGenerator(),
     )
 
+    if verification_service is None:
+        judge = LLMJudge(provider=MockProvider(response="{}"), model="mock", pass_threshold=0.7)
+        judge_engine = JudgeEngine(judge=judge, judge_model_id="mock")
+        verification_service = VerificationService(
+            judge_engine=judge_engine, session_factory=session_factory,
+            event_bus=EventBus(), judge_prompt_version="v1",
+        )
+
     chat_service = ChatService(
         routing_engine=routing_engine,
         provider_manager=provider_manager,
         model_registry=model_registry,
         session_factory=session_factory,
+        verification_service=verification_service,
     )
     return chat_service, session_factory
 
@@ -92,7 +110,9 @@ def _make_chat_service(tmp_path):
 async def test_chat_returns_result_and_persists_rows(tmp_path):
     chat_service, session_factory = _make_chat_service(tmp_path)
 
-    result = await chat_service.chat("List three fruits.", strategy="balanced")
+    result = await chat_service.chat(
+        "List three fruits.", strategy="balanced", background_tasks=BackgroundTasks()
+    )
 
     assert result.response
     assert result.routing.selected_model == "mock-model"
@@ -121,10 +141,36 @@ async def test_chat_persists_error_and_reraises_on_provider_failure(tmp_path, mo
     )
 
     with pytest.raises(ProviderError):
-        await chat_service.chat("List three fruits.", strategy="balanced")
+        await chat_service.chat(
+            "List three fruits.", strategy="balanced", background_tasks=BackgroundTasks()
+        )
 
     with session_factory() as session:
         response_row = session.query(ResponseRow).one()
 
     assert response_row.response_text is None
     assert response_row.error == "simulated failure"
+
+
+@pytest.mark.asyncio
+async def test_chat_schedules_verification_background_task(tmp_path):
+    chat_service, _ = _make_chat_service(tmp_path)
+    background_tasks = BackgroundTasks()
+
+    result = await chat_service.chat("Hello.", strategy="balanced", background_tasks=background_tasks)
+
+    assert result.response
+    assert len(background_tasks.tasks) == 1
+
+
+@pytest.mark.asyncio
+async def test_chat_succeeds_even_if_verification_service_would_fail(tmp_path):
+    chat_service, _ = _make_chat_service(tmp_path, verification_service=_FailingVerificationService())
+    background_tasks = BackgroundTasks()
+
+    result = await chat_service.chat("Hello.", strategy="balanced", background_tasks=background_tasks)
+
+    assert result.response
+    # The scheduled background task itself would raise if awaited directly,
+    # but chat() must return successfully regardless -- scheduling never fails
+    # here since add_task() only registers the call, it doesn't invoke it.

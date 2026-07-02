@@ -123,7 +123,52 @@ mapping `NoEligibleModelError` → 503 and `ProviderError` → 502.
 
 ## Verification
 
-_Not built yet — Phase 3._
+After `ChatService` persists a response, it schedules
+`VerificationService.verify(request_id, prompt, response)` as a FastAPI
+`BackgroundTasks` side effect — always via `try/except` around
+`add_task()` so a scheduling failure is logged and never affects the
+`/v1/chat` response. `VerificationService` owns the full DB lifecycle
+(`PENDING -> RUNNING -> COMPLETED | FAILED`), opening a fresh,
+independent `session_factory()` transaction for every state
+transition — no ORM instance is ever held across transaction
+boundaries. Each write commits before its corresponding
+`VerificationStarted`/`VerificationCompleted`/`VerificationFailed` event
+is published on the existing `EventBus`. A verification snapshot always
+copies `routing_model`/`routing_strategy`/`routing_complexity` from the
+`RoutingEventRow` that produced the response, so historical scores stay
+tied to the routing decision even if `routing.yaml` changes later.
+
+`BaseJudge`/`LLMJudge` are pure — `(prompt, response) -> JudgeVerdict`,
+no persistence, no retries, no knowledge of `request_id`. `LLMJudge`
+parses the judge model's raw text through `_JudgeResponseSchema
+.model_validate_json()`, so malformed JSON, missing fields, and
+out-of-range dimension scores (outside `[0.0, 1.0]`) all surface as a
+`pydantic.ValidationError`, which `VerificationService.verify()` catches
+and records as a `FAILED` verification rather than propagating.
+`JudgeEngine` is the sole place that times a judge call
+(`run() -> (JudgeVerdict, duration_ms)`); `VerificationService` calls
+`JudgeEngine`, never `BaseJudge` directly. `verify()` itself never
+raises — every exception path is swallowed internally, matching the
+best-effort contract with `ChatService`.
+
+`GET /v1/chat/{request_id}/verification` returns a single
+`VerificationResult` (404 if none exists); `raw_judge_response` is
+persisted for audit but deliberately excluded from this and every other
+API response. `GET /v1/metrics/quality` aggregates `COMPLETED` rows —
+average score/confidence, pass rate, timing breakdowns, and per-model /
+per-strategy / per-complexity averages — plus a `FAILED`-row count. Both
+routers, the judge, engine, and service are wired up in `main.py`'s
+`lifespan`, which loads `verification.yaml` once at startup via
+`VerificationConfigLoader`. If the configured judge model's provider is
+unavailable at startup (e.g. no API key), the app still boots — a
+fallback judge is substituted that fails cleanly (`FAILED` status) on
+every verification attempt instead of crashing startup, since
+verification is never a prerequisite for `/v1/chat`.
+
+No auto-escalation, no classifier retraining, no feedback loop into
+routing, no prompt optimization, no retry policies for failed
+verifications, and no separate worker process/queue — all explicitly
+deferred to a later phase.
 
 ## Learning
 
