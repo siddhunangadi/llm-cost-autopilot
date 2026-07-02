@@ -76,3 +76,18 @@ def test_dashboard_fragment_unknown_section_returns_404(tmp_path, monkeypatch):
         response = client.get("/dashboard/fragments/nonexistent")
 
         assert response.status_code == 404
+
+
+def test_dashboard_page_polled_sections_carry_htmx_polling_attributes(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/test.db")
+    app = create_app()
+    with TestClient(app) as client:
+        _seed(app.state.session_factory)
+
+        response = client.get("/dashboard")
+
+        body = response.text
+        for section in ["overview", "providers", "circuits", "recent-requests"]:
+            assert f'hx-get="/dashboard/fragments/{section}"' in body
+        assert 'hx-trigger="every 15s"' in body
+        assert 'hx-swap="outerHTML"' in body
