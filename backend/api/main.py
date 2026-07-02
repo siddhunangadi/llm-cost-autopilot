@@ -2,10 +2,13 @@ import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from backend.analysis.prompt_analyzer import PromptAnalyzer
+from backend.api.paths import STATIC_DIR
 from backend.api.routers.chat import router as chat_router
 from backend.api.routers.dashboard import router as dashboard_router
+from backend.api.routers.dashboard_ui import router as dashboard_ui_router
 from backend.api.routers.health import router as health_router
 from backend.api.routers.learning import router as learning_router
 from backend.api.routers.metrics import router as metrics_router
@@ -48,7 +51,7 @@ from backend.verification.engine import JudgeEngine
 from backend.verification.judge import BaseJudge, JudgeVerdict, LLMJudge
 from backend.verification.service import VerificationService
 
-APP_VERSION = "0.6.0"
+APP_VERSION = "0.6.1"
 
 
 class _UnavailableJudge(BaseJudge):
@@ -199,6 +202,8 @@ def create_app() -> FastAPI:
     app.include_router(metrics_router, prefix="/v1")
     app.include_router(learning_router, prefix="/v1")
     app.include_router(dashboard_router, prefix="/v1")
+    app.include_router(dashboard_ui_router)
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     return app
 
 

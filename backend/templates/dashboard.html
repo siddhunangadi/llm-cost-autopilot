@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="dashboard">
+  {% include "fragments/overview.html" %}
+  {% include "fragments/providers.html" %}
+
+  <section class="dashboard-section" id="section-cost">
+    <h2>Cost Analytics</h2>
+    {% if not cost_trend %}
+    <p class="empty-state">No cost data yet.</p>
+    {% else %}
+    <canvas id="cost-trend-chart"></canvas>
+    <canvas id="cost-by-model-chart"></canvas>
+    <script>
+      new Chart(document.getElementById('cost-trend-chart'), {
+        type: 'line',
+        data: {
+          labels: {{ cost_trend | map(attribute='date') | map('string') | list | tojson }},
+          datasets: [{ label: 'Total cost/day', data: {{ cost_trend | map(attribute='total_cost') | list | tojson }} }],
+        },
+      });
+      new Chart(document.getElementById('cost-by-model-chart'), {
+        type: 'bar',
+        data: {
+          labels: {{ cost_by_model.keys() | list | tojson }},
+          datasets: [{ label: 'Cost by model', data: {{ cost_by_model.values() | list | tojson }} }],
+        },
+      });
+    </script>
+    {% endif %}
+  </section>
+
+  <section class="dashboard-section" id="section-quality">
+    <h2>Quality Analytics</h2>
+    {% if not quality_trend %}
+    <p class="empty-state">No verification results available.</p>
+    {% else %}
+    <canvas id="quality-trend-chart"></canvas>
+    <script>
+      new Chart(document.getElementById('quality-trend-chart'), {
+        type: 'line',
+        data: {
+          labels: {{ quality_trend | map(attribute='date') | map('string') | list | tojson }},
+          datasets: [
+            { label: 'Pass rate', data: {{ quality_trend | map(attribute='pass_rate') | list | tojson }} },
+            { label: 'Average score', data: {{ quality_trend | map(attribute='average_score') | list | tojson }} },
+          ],
+        },
+      });
+    </script>
+    {% endif %}
+  </section>
+
+  <section class="dashboard-section" id="section-recommendations">
+    <h2>Learning Recommendations</h2>
+    {% if not recommendations %}
+    <p class="empty-state">No recommendations yet.</p>
+    {% else %}
+    <div class="card-grid">
+      {% for rec in recommendations %}
+      <div class="card">
+        <strong>{{ rec.subject }}</strong><br>
+        {{ rec.text }}<br>
+        Confidence: {{ "%.0f"|format(rec.evidence_confidence * 100) }}%
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="dashboard-section" id="section-failovers">
+    <h2>Failover Timeline</h2>
+    {% if not failover_events %}
+    <p class="empty-state">No failovers recorded.</p>
+    {% else %}
+    <ul>
+      {% for event in failover_events %}
+      <li>{{ event.occurred_at.strftime("%H:%M:%S") }} — {{ event.from_model }} → {{ event.to_model }} ({{ event.request_id }})</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </section>
+
+  {% include "fragments/circuits.html" %}
+  {% include "fragments/recent_requests.html" %}
+</main>
+{% endblock %}

@@ -40,13 +40,22 @@ class _FakeLearningService:
 
 
 class _FakeDashboardRepository:
-    def __init__(self, quality, cost_buckets, failover_data):
+    def __init__(self, quality, cost_buckets, failover_data,
+                 quality_trend=None, failover_events=None, recent_requests=None, cost_by_model=None):
         self._quality = quality
         self._cost_buckets = cost_buckets
         self._failover_data = failover_data
+        self._quality_trend = quality_trend or []
+        self._failover_events = failover_events or []
+        self._recent_requests = recent_requests or []
+        self._cost_by_model = cost_by_model or {}
         self.get_quality_aggregation_calls = 0
         self.get_cost_trend_calls = 0
         self.get_failover_summary_calls = 0
+        self.get_quality_trend_calls = 0
+        self.get_failover_events_calls = 0
+        self.get_recent_requests_calls = 0
+        self.get_cost_by_model_calls = 0
 
     def get_quality_aggregation(self):
         self.get_quality_aggregation_calls += 1
@@ -59,6 +68,22 @@ class _FakeDashboardRepository:
     def get_failover_summary(self, window):
         self.get_failover_summary_calls += 1
         return self._failover_data
+
+    def get_quality_trend(self, window):
+        self.get_quality_trend_calls += 1
+        return self._quality_trend
+
+    def get_failover_events(self, window):
+        self.get_failover_events_calls += 1
+        return self._failover_events
+
+    def get_recent_requests(self, limit=50):
+        self.get_recent_requests_calls += 1
+        return self._recent_requests
+
+    def get_cost_by_model(self, window):
+        self.get_cost_by_model_calls += 1
+        return self._cost_by_model
 
 
 def _recommendation_row():
@@ -189,3 +214,121 @@ async def test_get_overview_calls_each_collaborator_exactly_once():
     assert repository.get_quality_aggregation_calls == 1
     assert repository.get_cost_trend_calls == 1
     assert repository.get_failover_summary_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_get_overview_fragment_computes_aggregate_stats():
+    quality = QualityAggregation(
+        total_verified=10, average_score=0.8, average_confidence=0.7, pass_rate=0.9,
+        average_queue_delay_ms=5.0, average_evaluation_duration_ms=50.0,
+        average_total_verification_ms=60.0, verification_failure_count=1,
+        by_model={}, by_strategy={}, by_complexity={},
+    )
+    cost_buckets = [
+        CostBucketData(date=date(2026, 7, 3), request_count=4, total_cost=1.20),
+    ]
+    failover_data = FailoverData(request_ids=["req-1"])
+    repository = _FakeDashboardRepository(quality, cost_buckets, failover_data)
+    service = DashboardService(
+        provider_manager=_FakeProviderManager(),
+        provider_executor=_FakeProviderExecutor(),
+        learning_service=_FakeLearningService([]),
+        dashboard_repository=repository,
+    )
+
+    result = await service.get_overview_fragment(TimeWindow(days=7))
+
+    assert result["total_requests"] == 4
+    assert result["total_cost"] == pytest.approx(1.20)
+    assert result["average_quality_score"] == pytest.approx(0.8)
+    assert result["pass_rate"] == pytest.approx(0.9)
+    assert result["active_providers"] == 1
+    assert result["open_circuits"] == 0
+    assert result["failovers_today"] == 1
+
+
+@pytest.mark.asyncio
+async def test_get_provider_fragment_returns_only_providers_key():
+    repository = _FakeDashboardRepository(
+        QualityAggregation(0, 0, 0, 0, 0, 0, 0, 0, {}, {}, {}), [], FailoverData([]),
+    )
+    service = DashboardService(
+        provider_manager=_FakeProviderManager(),
+        provider_executor=_FakeProviderExecutor(),
+        learning_service=_FakeLearningService([]),
+        dashboard_repository=repository,
+    )
+
+    result = await service.get_provider_fragment()
+
+    assert set(result.keys()) == {"providers"}
+    assert set(result["providers"].keys()) == {"openai", "anthropic", "ollama"}
+
+
+@pytest.mark.asyncio
+async def test_get_circuit_fragment_returns_only_circuits_key():
+    repository = _FakeDashboardRepository(
+        QualityAggregation(0, 0, 0, 0, 0, 0, 0, 0, {}, {}, {}), [], FailoverData([]),
+    )
+    service = DashboardService(
+        provider_manager=_FakeProviderManager(),
+        provider_executor=_FakeProviderExecutor(),
+        learning_service=_FakeLearningService([]),
+        dashboard_repository=repository,
+    )
+
+    result = await service.get_circuit_fragment()
+
+    assert set(result.keys()) == {"circuits"}
+    assert result["circuits"]["openai"]["state"] == "closed"
+
+
+@pytest.mark.asyncio
+async def test_get_recent_requests_fragment_delegates_to_repository():
+    repository = _FakeDashboardRepository(
+        QualityAggregation(0, 0, 0, 0, 0, 0, 0, 0, {}, {}, {}), [], FailoverData([]),
+        recent_requests=["fake-row"],
+    )
+    service = DashboardService(
+        provider_manager=_FakeProviderManager(),
+        provider_executor=_FakeProviderExecutor(),
+        learning_service=_FakeLearningService([]),
+        dashboard_repository=repository,
+    )
+
+    result = await service.get_recent_requests_fragment()
+
+    assert result == {"requests": ["fake-row"]}
+    assert repository.get_recent_requests_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_get_dashboard_page_assembles_all_sections():
+    quality = QualityAggregation(
+        total_verified=1, average_score=0.9, average_confidence=0.8, pass_rate=1.0,
+        average_queue_delay_ms=0, average_evaluation_duration_ms=0,
+        average_total_verification_ms=0, verification_failure_count=0,
+        by_model={}, by_strategy={}, by_complexity={},
+    )
+    repository = _FakeDashboardRepository(
+        quality, [], FailoverData([]),
+        quality_trend=["trend-bucket"], failover_events=["failover-event"],
+        recent_requests=["request-row"], cost_by_model={"gpt-4o": 1.0},
+    )
+    service = DashboardService(
+        provider_manager=_FakeProviderManager(),
+        provider_executor=_FakeProviderExecutor(),
+        learning_service=_FakeLearningService([]),
+        dashboard_repository=repository,
+    )
+
+    result = await service.get_dashboard_page(TimeWindow(days=7))
+
+    assert set(result.keys()) == {
+        "overview", "providers", "circuits", "requests",
+        "cost_trend", "quality_trend", "cost_by_model", "failover_events", "recommendations",
+    }
+    assert result["quality_trend"] == ["trend-bucket"]
+    assert result["failover_events"] == ["failover-event"]
+    assert result["requests"] == ["request-row"]
+    assert result["cost_by_model"] == {"gpt-4o": 1.0}

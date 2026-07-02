@@ -144,3 +144,177 @@ def test_get_failover_summary_excludes_events_outside_window(tmp_path):
     summary = repository.get_failover_summary(TimeWindow(days=7))
 
     assert summary.request_ids == []
+
+
+def test_get_quality_trend_buckets_by_day(tmp_path):
+    repository, session_factory = _make_repository(tmp_path)
+    now = datetime.now(timezone.utc)
+    day2 = now - timedelta(days=2)
+    with session_factory() as session:
+        session.add(RequestRow(request_id="req-a", prompt="hi", strategy="balanced"))
+        session.add(VerificationRow(
+            request_id="req-a", status=VerificationStatus.COMPLETED.value,
+            routing_model="gpt-4o-mini", routing_strategy="balanced", routing_complexity="simple",
+            score=0.9, passed=True, confidence=0.8, created_at=now,
+        ))
+        session.add(RequestRow(request_id="req-b", prompt="hi", strategy="balanced"))
+        session.add(VerificationRow(
+            request_id="req-b", status=VerificationStatus.COMPLETED.value,
+            routing_model="gpt-4o-mini", routing_strategy="balanced", routing_complexity="simple",
+            score=0.5, passed=False, confidence=0.6, created_at=now,
+        ))
+        session.add(RequestRow(request_id="req-c", prompt="hi", strategy="balanced"))
+        session.add(VerificationRow(
+            request_id="req-c", status=VerificationStatus.COMPLETED.value,
+            routing_model="gpt-4o-mini", routing_strategy="balanced", routing_complexity="simple",
+            score=1.0, passed=True, confidence=0.9, created_at=day2,
+        ))
+        session.add(RequestRow(request_id="req-failed", prompt="hi", strategy="balanced"))
+        session.add(VerificationRow(
+            request_id="req-failed", status=VerificationStatus.FAILED.value,
+            routing_model="gpt-4o-mini", routing_strategy="balanced", routing_complexity="simple",
+            error_type="ValidationError", error="bad json", created_at=now,
+        ))
+        session.commit()
+
+    buckets = repository.get_quality_trend(TimeWindow(days=7))
+
+    assert len(buckets) == 2
+    assert buckets[0].date < buckets[1].date
+    today_bucket = buckets[1]
+    assert today_bucket.average_score == pytest.approx(0.7)
+    assert today_bucket.pass_rate == pytest.approx(0.5)
+
+
+def test_get_quality_trend_excludes_data_outside_window(tmp_path):
+    repository, session_factory = _make_repository(tmp_path)
+    old = datetime.now(timezone.utc) - timedelta(days=30)
+    with session_factory() as session:
+        session.add(RequestRow(request_id="req-old", prompt="hi", strategy="balanced"))
+        session.add(VerificationRow(
+            request_id="req-old", status=VerificationStatus.COMPLETED.value,
+            routing_model="gpt-4o-mini", routing_strategy="balanced", routing_complexity="simple",
+            score=0.9, passed=True, confidence=0.8, created_at=old,
+        ))
+        session.commit()
+
+    buckets = repository.get_quality_trend(TimeWindow(days=7))
+
+    assert buckets == []
+
+
+def test_get_failover_events_returns_from_to_and_timestamp(tmp_path):
+    repository, session_factory = _make_repository(tmp_path)
+    now = datetime.now(timezone.utc)
+    with session_factory() as session:
+        session.add(RequestRow(request_id="req-single", prompt="hi", strategy="balanced"))
+        session.add(_routing_event("req-single", now))
+
+        session.add(RequestRow(request_id="req-failover", prompt="hi", strategy="balanced"))
+        session.add(_routing_event("req-failover", now, model="gpt-4o-mini"))
+        session.add(_routing_event("req-failover", now + timedelta(seconds=1), model="gpt-4o"))
+        session.commit()
+
+    events = repository.get_failover_events(TimeWindow(days=7))
+
+    assert len(events) == 1
+    assert events[0].request_id == "req-failover"
+    assert events[0].from_model == "gpt-4o-mini"
+    assert events[0].to_model == "gpt-4o"
+
+
+def test_get_failover_events_excludes_events_outside_window(tmp_path):
+    repository, session_factory = _make_repository(tmp_path)
+    old = datetime.now(timezone.utc) - timedelta(days=30)
+    with session_factory() as session:
+        session.add(RequestRow(request_id="req-old-failover", prompt="hi", strategy="balanced"))
+        session.add(_routing_event("req-old-failover", old, model="gpt-4o-mini"))
+        session.add(_routing_event("req-old-failover", old, model="gpt-4o"))
+        session.commit()
+
+    events = repository.get_failover_events(TimeWindow(days=7))
+
+    assert events == []
+
+
+def test_get_recent_requests_returns_most_recent_first_with_joined_data(tmp_path):
+    repository, session_factory = _make_repository(tmp_path)
+    now = datetime.now(timezone.utc)
+    earlier = now - timedelta(minutes=5)
+    with session_factory() as session:
+        session.add(RequestRow(request_id="req-old", prompt="hi", strategy="balanced", created_at=earlier))
+        session.add(_routing_event("req-old", earlier, model="gpt-4o-mini"))
+        session.add(ResponseRow(request_id="req-old", response_text="ok", actual_cost=0.05, created_at=earlier))
+
+        session.add(RequestRow(request_id="req-new", prompt="hi", strategy="balanced", created_at=now))
+        session.add(_routing_event("req-new", now, model="gpt-4o"))
+        session.add(ResponseRow(request_id="req-new", response_text="ok", actual_cost=0.20, created_at=now))
+        session.add(VerificationRow(
+            request_id="req-new", status=VerificationStatus.COMPLETED.value,
+            routing_model="gpt-4o", routing_strategy="balanced", routing_complexity="simple",
+            score=0.95, passed=True, confidence=0.9, created_at=now,
+        ))
+        session.commit()
+
+    requests = repository.get_recent_requests(limit=10)
+
+    assert [r.request_id for r in requests] == ["req-new", "req-old"]
+    newest = requests[0]
+    assert newest.model == "gpt-4o"
+    assert newest.cost == pytest.approx(0.20)
+    assert newest.score == pytest.approx(0.95)
+    assert newest.passed is True
+    oldest = requests[1]
+    assert oldest.model == "gpt-4o-mini"
+    assert oldest.score is None
+    assert oldest.passed is None
+
+
+def test_get_recent_requests_respects_limit(tmp_path):
+    repository, session_factory = _make_repository(tmp_path)
+    now = datetime.now(timezone.utc)
+    with session_factory() as session:
+        for i in range(5):
+            session.add(RequestRow(request_id=f"req-{i}", prompt="hi", strategy="balanced", created_at=now))
+        session.commit()
+
+    requests = repository.get_recent_requests(limit=3)
+
+    assert len(requests) == 3
+
+
+def test_get_cost_by_model_sums_cost_per_model(tmp_path):
+    repository, session_factory = _make_repository(tmp_path)
+    now = datetime.now(timezone.utc)
+    with session_factory() as session:
+        session.add(RequestRow(request_id="req-a", prompt="hi", strategy="balanced"))
+        session.add(_routing_event("req-a", now, model="gpt-4o-mini"))
+        session.add(ResponseRow(request_id="req-a", response_text="ok", actual_cost=0.10, created_at=now))
+
+        session.add(RequestRow(request_id="req-b", prompt="hi", strategy="balanced"))
+        session.add(_routing_event("req-b", now, model="gpt-4o-mini"))
+        session.add(ResponseRow(request_id="req-b", response_text="ok", actual_cost=0.05, created_at=now))
+
+        session.add(RequestRow(request_id="req-c", prompt="hi", strategy="balanced"))
+        session.add(_routing_event("req-c", now, model="gpt-4o"))
+        session.add(ResponseRow(request_id="req-c", response_text="ok", actual_cost=0.30, created_at=now))
+        session.commit()
+
+    totals = repository.get_cost_by_model(TimeWindow(days=7))
+
+    assert totals["gpt-4o-mini"] == pytest.approx(0.15)
+    assert totals["gpt-4o"] == pytest.approx(0.30)
+
+
+def test_get_cost_by_model_excludes_data_outside_window(tmp_path):
+    repository, session_factory = _make_repository(tmp_path)
+    old = datetime.now(timezone.utc) - timedelta(days=30)
+    with session_factory() as session:
+        session.add(RequestRow(request_id="req-old", prompt="hi", strategy="balanced"))
+        session.add(_routing_event("req-old", old, model="gpt-4o-mini"))
+        session.add(ResponseRow(request_id="req-old", response_text="ok", actual_cost=0.10, created_at=old))
+        session.commit()
+
+    totals = repository.get_cost_by_model(TimeWindow(days=7))
+
+    assert totals == {}

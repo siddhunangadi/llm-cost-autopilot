@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}LLM Cost Autopilot — Operations Dashboard{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/dashboard.css?v={{ app_version }}">
+  <script src="/static/js/htmx.min.js?v={{ app_version }}"></script>
+  <script src="/static/js/chart.min.js?v={{ app_version }}"></script>
+</head>
+<body>
+  <header class="dashboard-header">
+    <h1>Operations Dashboard</h1>
+    <span class="last-updated" id="last-updated">Last updated: {{ now }} UTC</span>
+  </header>
+  {% block content %}{% endblock %}
+</body>
+</html>
