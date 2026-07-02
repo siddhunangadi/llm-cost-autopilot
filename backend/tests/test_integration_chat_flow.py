@@ -39,7 +39,9 @@ def test_full_chat_flow_end_to_end(monkeypatch, tmp_path, mocker):
     assert "request_id" in body
 
 
-def test_full_chat_flow_returns_502_on_real_provider_error(monkeypatch, tmp_path, mocker):
+def test_full_chat_flow_returns_503_when_provider_fails_and_no_failover_candidate(
+    monkeypatch, tmp_path, mocker
+):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/integration2.db")
 
@@ -58,4 +60,4 @@ def test_full_chat_flow_returns_502_on_real_provider_error(monkeypatch, tmp_path
     with TestClient(app) as client:
         response = client.post("/v1/chat", json={"prompt": "Hello.", "strategy": "cost"})
 
-    assert response.status_code == 502
+    assert response.status_code == 503

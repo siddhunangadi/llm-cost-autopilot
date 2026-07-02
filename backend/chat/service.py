@@ -7,8 +7,9 @@ from sqlalchemy.orm import sessionmaker
 
 from backend.database.models import RequestRow, ResponseRow, RoutingEventRow
 from backend.providers.base import ProviderError
+from backend.providers.executor import CircuitOpenError, ProviderExecutor
 from backend.providers.manager import ProviderManager
-from backend.routing.engine import RoutingDecision, RoutingEngine
+from backend.routing.engine import NoEligibleModelError, RoutingDecision, RoutingEngine
 from backend.services.model_registry import ModelRegistry
 from backend.telemetry.logging import get_logger
 from backend.verification.service import VerificationService
@@ -25,12 +26,14 @@ class ChatService:
         self,
         routing_engine: RoutingEngine,
         provider_manager: ProviderManager,
+        provider_executor: ProviderExecutor,
         model_registry: ModelRegistry,
         session_factory: sessionmaker,
         verification_service: VerificationService,
     ) -> None:
         self._routing_engine = routing_engine
         self._provider_manager = provider_manager
+        self._provider_executor = provider_executor
         self._model_registry = model_registry
         self._session_factory = session_factory
         self._verification_service = verification_service
@@ -44,32 +47,51 @@ class ChatService:
 
         with self._session_factory() as session:
             session.add(RequestRow(request_id=request_id, prompt=prompt, strategy=strategy))
-            session.add(RoutingEventRow(
-                request_id=request_id,
-                complexity=decision.complexity.value,
-                confidence=decision.confidence,
-                selected_model=decision.selected_model,
-                selected_strategy=decision.strategy,
-                estimated_cost=decision.estimated_cost,
-                estimated_latency_ms=decision.estimated_latency_ms,
-                reasoning=json.dumps(decision.reasoning),
-            ))
             session.commit()
+        self._persist_routing_event(request_id, decision)
 
-        model_spec = self._model_registry.get_model(decision.selected_model)
-        provider = self._provider_manager.get_provider(model_spec.provider)
+        spec = self._model_registry.get_model(decision.selected_model)
 
         try:
-            response_text = await provider.generate(prompt, model=model_spec.model)
-        except ProviderError as exc:
-            with self._session_factory() as session:
-                session.add(ResponseRow(request_id=request_id, error=str(exc)))
-                session.commit()
-            raise
+            response_text = await self._provider_executor.generate(
+                spec.provider, prompt, spec.model, retry=True
+            )
+        except (ProviderError, CircuitOpenError) as exc:
+            reason = "circuit_open" if isinstance(exc, CircuitOpenError) else "provider_error"
+            try:
+                failover_decision = self._routing_engine.route(
+                    prompt, strategy_name=strategy,
+                    exclude_providers=frozenset({spec.provider}),
+                )
+            except NoEligibleModelError as no_eligible:
+                self._persist_error_response(
+                    request_id, error_type="no_eligible_model", error=str(no_eligible)
+                )
+                raise
 
+            self._persist_routing_event(request_id, failover_decision)
+            new_spec = self._model_registry.get_model(failover_decision.selected_model)
+            self._provider_executor.emit_failover_triggered(
+                failed_provider=spec.provider, replacement_provider=new_spec.provider,
+                original_model=spec.id, replacement_model=new_spec.id,
+                reason=reason, attempt_number=2,
+            )
+
+            try:
+                response_text = await self._provider_executor.generate(
+                    new_spec.provider, prompt, new_spec.model, retry=False
+                )
+            except (ProviderError, CircuitOpenError) as exc2:
+                error_type = "circuit_open" if isinstance(exc2, CircuitOpenError) else "provider_error"
+                self._persist_error_response(request_id, error_type=error_type, error=str(exc2))
+                raise
+
+            decision, spec = failover_decision, new_spec
+
+        provider = self._provider_manager.get_provider(spec.provider)
         input_tokens = provider.count_tokens(prompt)
         output_tokens = provider.count_tokens(response_text)
-        actual_cost = self._model_registry.estimate_cost(model_spec.id, input_tokens, output_tokens)
+        actual_cost = self._model_registry.estimate_cost(spec.id, input_tokens, output_tokens)
 
         with self._session_factory() as session:
             session.add(ResponseRow(
@@ -91,3 +113,22 @@ class ChatService:
             )
 
         return ChatResult(request_id=request_id, response=response_text, routing=decision)
+
+    def _persist_routing_event(self, request_id: str, decision: RoutingDecision) -> None:
+        with self._session_factory() as session:
+            session.add(RoutingEventRow(
+                request_id=request_id,
+                complexity=decision.complexity.value,
+                confidence=decision.confidence,
+                selected_model=decision.selected_model,
+                selected_strategy=decision.strategy,
+                estimated_cost=decision.estimated_cost,
+                estimated_latency_ms=decision.estimated_latency_ms,
+                reasoning=json.dumps(decision.reasoning),
+            ))
+            session.commit()
+
+    def _persist_error_response(self, request_id: str, *, error_type: str, error: str) -> None:
+        with self._session_factory() as session:
+            session.add(ResponseRow(request_id=request_id, error_type=error_type, error=error))
+            session.commit()

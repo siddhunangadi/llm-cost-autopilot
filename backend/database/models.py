@@ -64,6 +64,7 @@ class ResponseRow(Base):
     actual_output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     actual_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
     error: Mapped[str | None] = mapped_column(String, nullable=True)
+    error_type: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
