@@ -45,7 +45,7 @@ from backend.verification.engine import JudgeEngine
 from backend.verification.judge import BaseJudge, JudgeVerdict, LLMJudge
 from backend.verification.service import VerificationService
 
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.5.0"
 
 
 class _UnavailableJudge(BaseJudge):
@@ -171,6 +171,7 @@ async def lifespan(app: FastAPI):
     app.state.session_factory = session_factory
     app.state.chat_service = chat_service
     app.state.learning_service = learning_service
+    app.state.provider_executor = provider_executor
     app.state.version = APP_VERSION
     app.state.start_time = time.time()
 
