@@ -8,6 +8,7 @@ from backend.events.bus import EventBus
 from backend.learning.service import LearningService
 from backend.providers.executor import ProviderExecutor
 from backend.providers.manager import ProviderManager
+from backend.services.dashboard_service import DashboardService
 from backend.services.model_registry import ModelRegistry
 
 
@@ -51,6 +52,10 @@ def get_provider_executor(request: Request) -> ProviderExecutor:
     return request.app.state.provider_executor
 
 
+def get_dashboard_service(request: Request) -> DashboardService:
+    return request.app.state.dashboard_service
+
+
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 EventBusDep = Annotated[EventBus, Depends(get_event_bus)]
 ProviderManagerDep = Annotated[ProviderManager, Depends(get_provider_manager)]
@@ -61,3 +66,4 @@ AppStartTimeDep = Annotated[float, Depends(get_app_start_time)]
 ChatServiceDep = Annotated[ChatService, Depends(get_chat_service)]
 LearningServiceDep = Annotated[LearningService, Depends(get_learning_service)]
 ProviderExecutorDep = Annotated[ProviderExecutor, Depends(get_provider_executor)]
+DashboardServiceDep = Annotated[DashboardService, Depends(get_dashboard_service)]

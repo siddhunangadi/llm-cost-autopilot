@@ -68,3 +68,15 @@ class LearningService:
                 )
                 .all()
             )
+
+    def get_recommendations(self) -> list[RecommendationRow]:
+        with self._session_factory() as session:
+            return (
+                session.query(RecommendationRow)
+                .order_by(
+                    RecommendationRow.severity.desc(),
+                    RecommendationRow.evidence_confidence.desc(),
+                    RecommendationRow.updated_at.desc(),
+                )
+                .all()
+            )
