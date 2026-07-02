@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.database.base import Base
@@ -80,3 +80,33 @@ class RoutingEventRow(Base):
     estimated_latency_ms: Mapped[float] = mapped_column(Float, nullable=False)
     reasoning: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class VerificationRow(Base):
+    __tablename__ = "verifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    request_id: Mapped[str] = mapped_column(String, ForeignKey("requests.request_id"), nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+
+    routing_model: Mapped[str] = mapped_column(String, nullable=False)
+    routing_strategy: Mapped[str] = mapped_column(String, nullable=False)
+    routing_complexity: Mapped[str] = mapped_column(String, nullable=False)
+
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rationale: Mapped[str | None] = mapped_column(String, nullable=True)
+    dimensions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    judge_model: Mapped[str | None] = mapped_column(String, nullable=True)
+    judge_prompt_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    evaluation_duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    raw_judge_response: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    error_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    error: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
