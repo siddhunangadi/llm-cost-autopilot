@@ -1,0 +1,15 @@
+{% if standalone %}
+<div id="last-updated" hx-swap-oob="true" class="last-updated">Last updated: {{ now }} UTC</div>
+{% endif %}
+<section class="dashboard-section" id="section-overview">
+  <h2>System Overview</h2>
+  <div class="stat-row">
+    <div class="stat"><div class="value">{{ overview.total_requests }}</div><div class="label">Total Requests</div></div>
+    <div class="stat"><div class="value">${{ "%.2f"|format(overview.total_cost) }}</div><div class="label">Total Cost</div></div>
+    <div class="stat"><div class="value">{{ "%.2f"|format(overview.average_quality_score) }}</div><div class="label">Avg Quality Score</div></div>
+    <div class="stat"><div class="value">{{ "%.0f"|format(overview.pass_rate * 100) }}%</div><div class="label">Pass Rate</div></div>
+    <div class="stat"><div class="value">{{ overview.active_providers }}</div><div class="label">Active Providers</div></div>
+    <div class="stat"><div class="value">{{ overview.open_circuits }}</div><div class="label">Open Circuits</div></div>
+    <div class="stat"><div class="value">{{ overview.failovers_today }}</div><div class="label">Failovers Today</div></div>
+  </div>
+</section>

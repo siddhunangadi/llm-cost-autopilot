@@ -1,0 +1,19 @@
+{% if standalone %}
+<div id="last-updated" hx-swap-oob="true" class="last-updated">Last updated: {{ now }} UTC</div>
+{% endif %}
+<section class="dashboard-section" id="section-circuits">
+  <h2>Circuit Breakers</h2>
+  {% if not circuits %}
+  <p class="empty-state">No circuit breaker data yet.</p>
+  {% else %}
+  <div class="card-grid">
+    {% for name, state in circuits.items() %}
+    <div class="card">
+      <strong>{{ name }}</strong><br>
+      <span class="state-{{ state.state }}">{{ state.state | capitalize }}</span><br>
+      Consecutive failures: {{ state.consecutive_failures }}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>

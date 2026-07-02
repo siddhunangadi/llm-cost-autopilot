@@ -1,0 +1,20 @@
+{% if standalone %}
+<div id="last-updated" hx-swap-oob="true" class="last-updated">Last updated: {{ now }} UTC</div>
+{% endif %}
+<section class="dashboard-section" id="section-providers">
+  <h2>Provider Health</h2>
+  {% if not providers %}
+  <p class="empty-state">No providers configured.</p>
+  {% else %}
+  <div class="card-grid">
+    {% for name, status in providers.items() %}
+    <div class="card">
+      <strong>{{ name }}</strong><br>
+      {{ "Available" if status.availability == "available" else "Disabled" }}<br>
+      Circuit: <span class="state-{{ status.circuit_state }}">{{ status.circuit_state }}</span><br>
+      Failures: {{ status.consecutive_failures }}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
