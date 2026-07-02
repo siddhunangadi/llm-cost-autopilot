@@ -6,6 +6,8 @@ from backend.api.routers.chat import router as chat_router
 from backend.chat.service import ChatResult
 from backend.classifier.complexity_classifier import ComplexityTier
 from backend.providers.base import ProviderError
+from backend.providers.circuit_breaker import CircuitState
+from backend.providers.executor import CircuitOpenError
 from backend.routing.engine import NoEligibleModelError, RoutingDecision
 
 
@@ -85,3 +87,21 @@ def test_chat_endpoint_returns_502_for_provider_error():
     response = client.post("/v1/chat", json={"prompt": "Hello."})
 
     assert response.status_code == 502
+
+
+def test_chat_endpoint_returns_503_for_circuit_open():
+    app = FastAPI()
+    app.include_router(chat_router, prefix="/v1")
+    exc = CircuitOpenError(
+        provider="openai",
+        state=CircuitState.OPEN,
+        consecutive_failures=5,
+        retry_after_seconds=12.4,
+    )
+    app.dependency_overrides[get_chat_service] = lambda: _FakeChatService(exception=exc)
+
+    client = TestClient(app)
+    response = client.post("/v1/chat", json={"prompt": "Hello."})
+
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == str(round(exc.retry_after_seconds))
