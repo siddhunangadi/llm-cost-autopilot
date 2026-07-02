@@ -235,3 +235,49 @@ def test_get_failover_events_excludes_events_outside_window(tmp_path):
     events = repository.get_failover_events(TimeWindow(days=7))
 
     assert events == []
+
+
+def test_get_recent_requests_returns_most_recent_first_with_joined_data(tmp_path):
+    repository, session_factory = _make_repository(tmp_path)
+    now = datetime.now(timezone.utc)
+    earlier = now - timedelta(minutes=5)
+    with session_factory() as session:
+        session.add(RequestRow(request_id="req-old", prompt="hi", strategy="balanced", created_at=earlier))
+        session.add(_routing_event("req-old", earlier, model="gpt-4o-mini"))
+        session.add(ResponseRow(request_id="req-old", response_text="ok", actual_cost=0.05, created_at=earlier))
+
+        session.add(RequestRow(request_id="req-new", prompt="hi", strategy="balanced", created_at=now))
+        session.add(_routing_event("req-new", now, model="gpt-4o"))
+        session.add(ResponseRow(request_id="req-new", response_text="ok", actual_cost=0.20, created_at=now))
+        session.add(VerificationRow(
+            request_id="req-new", status=VerificationStatus.COMPLETED.value,
+            routing_model="gpt-4o", routing_strategy="balanced", routing_complexity="simple",
+            score=0.95, passed=True, confidence=0.9, created_at=now,
+        ))
+        session.commit()
+
+    requests = repository.get_recent_requests(limit=10)
+
+    assert [r.request_id for r in requests] == ["req-new", "req-old"]
+    newest = requests[0]
+    assert newest.model == "gpt-4o"
+    assert newest.cost == pytest.approx(0.20)
+    assert newest.score == pytest.approx(0.95)
+    assert newest.passed is True
+    oldest = requests[1]
+    assert oldest.model == "gpt-4o-mini"
+    assert oldest.score is None
+    assert oldest.passed is None
+
+
+def test_get_recent_requests_respects_limit(tmp_path):
+    repository, session_factory = _make_repository(tmp_path)
+    now = datetime.now(timezone.utc)
+    with session_factory() as session:
+        for i in range(5):
+            session.add(RequestRow(request_id=f"req-{i}", prompt="hi", strategy="balanced", created_at=now))
+        session.commit()
+
+    requests = repository.get_recent_requests(limit=3)
+
+    assert len(requests) == 3

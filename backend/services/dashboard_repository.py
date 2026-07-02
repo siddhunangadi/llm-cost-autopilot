@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy.orm import sessionmaker
 
-from backend.database.models import ResponseRow, RoutingEventRow, VerificationRow
+from backend.database.models import RequestRow, ResponseRow, RoutingEventRow, VerificationRow
 from backend.verification.status import VerificationStatus
 
 
@@ -36,6 +36,18 @@ class CostBucketData:
     date: date
     request_count: int
     total_cost: float
+
+
+@dataclass(frozen=True)
+class RecentRequestRow:
+    request_id: str
+    model: str
+    strategy: str
+    complexity: str
+    cost: float | None
+    score: float | None
+    passed: bool | None
+    created_at: datetime
 
 
 @dataclass(frozen=True)
@@ -198,3 +210,52 @@ class DashboardRepository:
             if len(group) == 2
         ]
         return sorted(events, key=lambda e: e.occurred_at)
+
+    def get_recent_requests(self, limit: int = 50) -> list[RecentRequestRow]:
+        with self._session_factory() as session:
+            requests = (
+                session.query(RequestRow)
+                .order_by(RequestRow.created_at.desc())
+                .limit(limit)
+                .all()
+            )
+            request_ids = [r.request_id for r in requests]
+            routing_events = (
+                session.query(RoutingEventRow)
+                .filter(RoutingEventRow.request_id.in_(request_ids))
+                .order_by(RoutingEventRow.created_at)
+                .all()
+            )
+            responses = (
+                session.query(ResponseRow)
+                .filter(ResponseRow.request_id.in_(request_ids))
+                .all()
+            )
+            verifications = (
+                session.query(VerificationRow)
+                .filter(VerificationRow.request_id.in_(request_ids))
+                .all()
+            )
+
+        latest_routing: dict[str, RoutingEventRow] = {}
+        for row in routing_events:
+            latest_routing[row.request_id] = row  # ascending order, last write wins
+        response_by_request = {row.request_id: row for row in responses}
+        verification_by_request = {row.request_id: row for row in verifications}
+
+        result = []
+        for req in requests:
+            routing = latest_routing.get(req.request_id)
+            response = response_by_request.get(req.request_id)
+            verification = verification_by_request.get(req.request_id)
+            result.append(RecentRequestRow(
+                request_id=req.request_id,
+                model=routing.selected_model if routing else "unknown",
+                strategy=routing.selected_strategy if routing else req.strategy,
+                complexity=routing.complexity if routing else "unknown",
+                cost=response.actual_cost if response else None,
+                score=verification.score if verification else None,
+                passed=verification.passed if verification else None,
+                created_at=req.created_at,
+            ))
+        return result
