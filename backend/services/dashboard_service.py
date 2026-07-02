@@ -127,6 +127,66 @@ class DashboardService:
             recommendations=[self._to_recommendation_response(r) for r in recommendation_rows],
         )
 
+    async def get_overview_fragment(self, window: TimeWindow) -> dict:
+        availability, circuits, quality_agg, cost_buckets, failover_today = await asyncio.gather(
+            asyncio.to_thread(self._provider_manager.list_providers),
+            asyncio.to_thread(self._provider_executor.circuit_states),
+            asyncio.to_thread(self._dashboard_repository.get_quality_aggregation),
+            asyncio.to_thread(self._dashboard_repository.get_cost_trend, window),
+            asyncio.to_thread(self._dashboard_repository.get_failover_summary, TimeWindow(days=1)),
+        )
+        return {
+            "total_requests": sum(b.request_count for b in cost_buckets),
+            "total_cost": sum(b.total_cost for b in cost_buckets),
+            "average_quality_score": quality_agg.average_score,
+            "pass_rate": quality_agg.pass_rate,
+            "active_providers": sum(1 for status in availability.values() if status == "available"),
+            "open_circuits": sum(1 for c in circuits.values() if c.get("state") == "open"),
+            "failovers_today": len(failover_today.request_ids),
+        }
+
+    async def get_provider_fragment(self) -> dict:
+        availability, circuits = await asyncio.gather(
+            asyncio.to_thread(self._provider_manager.list_providers),
+            asyncio.to_thread(self._provider_executor.circuit_states),
+        )
+        return {"providers": self._merge_provider_status(availability, circuits)}
+
+    async def get_circuit_fragment(self) -> dict:
+        circuits = await asyncio.to_thread(self._provider_executor.circuit_states)
+        return {"circuits": circuits}
+
+    async def get_recent_requests_fragment(self, limit: int = 50) -> dict:
+        requests = await asyncio.to_thread(self._dashboard_repository.get_recent_requests, limit)
+        return {"requests": requests}
+
+    async def get_dashboard_page(self, window: TimeWindow) -> dict:
+        (
+            overview, provider_data, circuit_data, recent_requests_data,
+            cost_trend, quality_trend, cost_by_model, failover_events, recommendation_rows,
+        ) = await asyncio.gather(
+            self.get_overview_fragment(window),
+            self.get_provider_fragment(),
+            self.get_circuit_fragment(),
+            self.get_recent_requests_fragment(),
+            asyncio.to_thread(self._dashboard_repository.get_cost_trend, window),
+            asyncio.to_thread(self._dashboard_repository.get_quality_trend, window),
+            asyncio.to_thread(self._dashboard_repository.get_cost_by_model, window),
+            asyncio.to_thread(self._dashboard_repository.get_failover_events, window),
+            asyncio.to_thread(self._learning_service.get_recommendations),
+        )
+        return {
+            "overview": overview,
+            "providers": provider_data["providers"],
+            "circuits": circuit_data["circuits"],
+            "requests": recent_requests_data["requests"],
+            "cost_trend": cost_trend,
+            "quality_trend": quality_trend,
+            "cost_by_model": cost_by_model,
+            "failover_events": failover_events,
+            "recommendations": [self._to_recommendation_response(r) for r in recommendation_rows],
+        }
+
     def _merge_provider_status(
         self, availability: dict[str, str], circuits: dict[str, dict],
     ) -> dict[str, ProviderDashboardStatus]:
