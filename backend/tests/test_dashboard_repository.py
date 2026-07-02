@@ -201,3 +201,37 @@ def test_get_quality_trend_excludes_data_outside_window(tmp_path):
     buckets = repository.get_quality_trend(TimeWindow(days=7))
 
     assert buckets == []
+
+
+def test_get_failover_events_returns_from_to_and_timestamp(tmp_path):
+    repository, session_factory = _make_repository(tmp_path)
+    now = datetime.now(timezone.utc)
+    with session_factory() as session:
+        session.add(RequestRow(request_id="req-single", prompt="hi", strategy="balanced"))
+        session.add(_routing_event("req-single", now))
+
+        session.add(RequestRow(request_id="req-failover", prompt="hi", strategy="balanced"))
+        session.add(_routing_event("req-failover", now, model="gpt-4o-mini"))
+        session.add(_routing_event("req-failover", now + timedelta(seconds=1), model="gpt-4o"))
+        session.commit()
+
+    events = repository.get_failover_events(TimeWindow(days=7))
+
+    assert len(events) == 1
+    assert events[0].request_id == "req-failover"
+    assert events[0].from_model == "gpt-4o-mini"
+    assert events[0].to_model == "gpt-4o"
+
+
+def test_get_failover_events_excludes_events_outside_window(tmp_path):
+    repository, session_factory = _make_repository(tmp_path)
+    old = datetime.now(timezone.utc) - timedelta(days=30)
+    with session_factory() as session:
+        session.add(RequestRow(request_id="req-old-failover", prompt="hi", strategy="balanced"))
+        session.add(_routing_event("req-old-failover", old, model="gpt-4o-mini"))
+        session.add(_routing_event("req-old-failover", old, model="gpt-4o"))
+        session.commit()
+
+    events = repository.get_failover_events(TimeWindow(days=7))
+
+    assert events == []

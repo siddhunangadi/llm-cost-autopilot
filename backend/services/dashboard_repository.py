@@ -50,6 +50,14 @@ class FailoverData:
     request_ids: list[str]
 
 
+@dataclass(frozen=True)
+class FailoverEvent:
+    request_id: str
+    from_model: str
+    to_model: str
+    occurred_at: datetime
+
+
 def _avg(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 
@@ -165,3 +173,28 @@ class DashboardRepository:
         return FailoverData(
             request_ids=sorted(rid for rid, count in counts.items() if count == 2)
         )
+
+    def get_failover_events(self, window: TimeWindow) -> list[FailoverEvent]:
+        with self._session_factory() as session:
+            rows = (
+                session.query(RoutingEventRow)
+                .filter(RoutingEventRow.created_at >= window.cutoff)
+                .order_by(RoutingEventRow.request_id, RoutingEventRow.created_at)
+                .all()
+            )
+
+        grouped: dict[str, list[RoutingEventRow]] = {}
+        for row in rows:
+            grouped.setdefault(row.request_id, []).append(row)
+
+        events = [
+            FailoverEvent(
+                request_id=request_id,
+                from_model=group[0].selected_model,
+                to_model=group[1].selected_model,
+                occurred_at=group[1].created_at,
+            )
+            for request_id, group in grouped.items()
+            if len(group) == 2
+        ]
+        return sorted(events, key=lambda e: e.occurred_at)
