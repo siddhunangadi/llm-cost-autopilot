@@ -255,6 +255,10 @@ class CircuitOpenError(Exception):
 
 
 class ProviderExecutor:
+    """Retry attempts are considered part of a single logical provider
+    execution. Metrics, breaker state, and events are emitted once per
+    logical execution rather than once per individual retry attempt."""
+
     def __init__(
         self,
         provider_manager: ProviderManager,
