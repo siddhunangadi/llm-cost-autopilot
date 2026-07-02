@@ -20,10 +20,13 @@ from backend.learning.detector import FailurePatternDetector
 from backend.learning.generator import RecommendationGenerator
 from backend.learning.rules import ComplexityTierRule, DetectionRuleConfig, ModelComplexityRule
 from backend.learning.service import LearningService
+from backend.providers.circuit_breaker import CircuitBreaker
+from backend.providers.executor import ProviderExecutor
 from backend.providers.factory import ProviderFactory
-from backend.providers.manager import ProviderManager
+from backend.providers.manager import KNOWN_PROVIDER_NAMES, ProviderManager
 from backend.providers.mock_provider import MockProvider
 from backend.providers.openai_provider import OpenAIProvider
+from backend.providers.retry import ExponentialBackoffRetryPolicy
 from backend.routing.config_loader import RoutingConfigLoader
 from backend.routing.engine import RoutingEngine
 from backend.routing.explanation import ExplanationGenerator
@@ -135,9 +138,17 @@ async def lifespan(app: FastAPI):
         judge_prompt_version=verification_config.judge_prompt_version,
     )
 
+    provider_executor = ProviderExecutor(
+        provider_manager=provider_manager,
+        retry_policy=ExponentialBackoffRetryPolicy(),
+        circuit_breakers={name: CircuitBreaker() for name in KNOWN_PROVIDER_NAMES},
+        event_bus=event_bus,
+    )
+
     chat_service = ChatService(
         routing_engine=routing_engine,
         provider_manager=provider_manager,
+        provider_executor=provider_executor,
         model_registry=model_registry,
         session_factory=session_factory,
         verification_service=verification_service,
