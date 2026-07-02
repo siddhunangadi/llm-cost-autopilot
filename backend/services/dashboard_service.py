@@ -44,14 +44,6 @@ class QualityMetrics(BaseModel):
     by_complexity: dict[str, float]
 
 
-class LearningSummary(BaseModel):
-    total_verified: int
-    overall_pass_rate: float
-    by_model: dict[str, float]
-    by_strategy: dict[str, float]
-    by_complexity: dict[str, float]
-
-
 class RecommendationResponse(BaseModel):
     signature: str
     rule_type: RuleType
@@ -138,14 +130,15 @@ class DashboardService:
     def _merge_provider_status(
         self, availability: dict[str, str], circuits: dict[str, dict],
     ) -> dict[str, ProviderDashboardStatus]:
-        return {
-            name: ProviderDashboardStatus(
+        result = {}
+        for name, status in availability.items():
+            circuit = circuits.get(name, {})
+            result[name] = ProviderDashboardStatus(
                 availability=status,
-                circuit_state=circuits[name]["state"],
-                consecutive_failures=circuits[name]["consecutive_failures"],
+                circuit_state=circuit.get("state", "unknown"),
+                consecutive_failures=circuit.get("consecutive_failures", 0),
             )
-            for name, status in availability.items()
-        }
+        return result
 
     def _to_recommendation_response(self, r: RecommendationRow) -> RecommendationResponse:
         return RecommendationResponse(

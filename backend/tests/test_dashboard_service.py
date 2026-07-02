@@ -142,6 +142,33 @@ async def test_get_overview_computes_average_cost_correctly():
     assert overview.cost_trend[0].average_cost == pytest.approx(0.25)
 
 
+class _FakeProviderExecutorMissingProvider(_FakeProviderExecutor):
+    def circuit_states(self):
+        self.circuit_states_calls += 1
+        return {
+            "openai": {"state": "closed", "consecutive_failures": 0, "successes": 5, "failures": 1},
+            "anthropic": {"state": "closed", "consecutive_failures": 0, "successes": 0, "failures": 0},
+        }
+
+
+async def test_get_overview_handles_missing_circuit_state_without_raising():
+    provider_manager = _FakeProviderManager()
+    provider_executor = _FakeProviderExecutorMissingProvider()
+    learning_service = _FakeLearningService([])
+    repository = _FakeDashboardRepository(
+        quality=_quality_aggregation(), cost_buckets=[], failover_data=FailoverData(request_ids=[]),
+    )
+    service = DashboardService(
+        provider_manager=provider_manager, provider_executor=provider_executor,
+        learning_service=learning_service, dashboard_repository=repository,
+    )
+
+    overview = await service.get_overview(TimeWindow(days=7))
+
+    assert overview.providers["ollama"].circuit_state == "unknown"
+    assert overview.providers["ollama"].consecutive_failures == 0
+
+
 async def test_get_overview_calls_each_collaborator_exactly_once():
     provider_manager = _FakeProviderManager()
     provider_executor = _FakeProviderExecutor()
