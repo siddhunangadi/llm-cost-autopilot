@@ -2,6 +2,7 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
+from backend.chat.service import ChatService
 from backend.config.settings import Settings
 from backend.events.bus import EventBus
 from backend.providers.manager import ProviderManager
@@ -36,6 +37,10 @@ def get_app_start_time(request: Request) -> float:
     return request.app.state.start_time
 
 
+def get_chat_service(request: Request) -> ChatService:
+    return request.app.state.chat_service
+
+
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 EventBusDep = Annotated[EventBus, Depends(get_event_bus)]
 ProviderManagerDep = Annotated[ProviderManager, Depends(get_provider_manager)]
@@ -43,3 +48,4 @@ ModelRegistryDep = Annotated[ModelRegistry, Depends(get_model_registry)]
 SessionFactoryDep = Annotated[object, Depends(get_session_factory)]
 AppVersionDep = Annotated[str, Depends(get_app_version)]
 AppStartTimeDep = Annotated[float, Depends(get_app_start_time)]
+ChatServiceDep = Annotated[ChatService, Depends(get_chat_service)]

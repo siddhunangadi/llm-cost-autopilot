@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.database.base import Base
@@ -42,3 +42,41 @@ class ModelRow(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
+
+
+class RequestRow(Base):
+    __tablename__ = "requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    request_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    prompt: Mapped[str] = mapped_column(String, nullable=False)
+    strategy: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class ResponseRow(Base):
+    __tablename__ = "responses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    request_id: Mapped[str] = mapped_column(String, ForeignKey("requests.request_id"), nullable=False)
+    response_text: Mapped[str | None] = mapped_column(String, nullable=True)
+    actual_input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    actual_output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    actual_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
+    error: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class RoutingEventRow(Base):
+    __tablename__ = "routing_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    request_id: Mapped[str] = mapped_column(String, ForeignKey("requests.request_id"), nullable=False)
+    complexity: Mapped[str] = mapped_column(String, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    selected_model: Mapped[str] = mapped_column(String, nullable=False)
+    selected_strategy: Mapped[str] = mapped_column(String, nullable=False)
+    estimated_cost: Mapped[float] = mapped_column(Float, nullable=False)
+    estimated_latency_ms: Mapped[float] = mapped_column(Float, nullable=False)
+    reasoning: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
