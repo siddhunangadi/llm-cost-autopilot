@@ -1,7 +1,8 @@
 {% if standalone %}
 <div id="last-updated" hx-swap-oob="true" class="last-updated">Last updated: {{ now }} UTC</div>
 {% endif %}
-<section class="dashboard-section" id="section-circuits">
+<section class="dashboard-section" id="section-circuits"
+  hx-get="/dashboard/fragments/circuits" hx-trigger="every 15s" hx-swap="outerHTML">
   <h2>Circuit Breakers</h2>
   {% if not circuits %}
   <p class="empty-state">No circuit breaker data yet.</p>

@@ -1,7 +1,8 @@
 {% if standalone %}
 <div id="last-updated" hx-swap-oob="true" class="last-updated">Last updated: {{ now }} UTC</div>
 {% endif %}
-<section class="dashboard-section" id="section-recent-requests">
+<section class="dashboard-section" id="section-recent-requests"
+  hx-get="/dashboard/fragments/recent-requests" hx-trigger="every 15s" hx-swap="outerHTML">
   <h2>Recent Requests</h2>
   {% if not requests %}
   <p class="empty-state">No requests yet.</p>

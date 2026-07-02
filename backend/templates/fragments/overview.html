@@ -1,7 +1,8 @@
 {% if standalone %}
 <div id="last-updated" hx-swap-oob="true" class="last-updated">Last updated: {{ now }} UTC</div>
 {% endif %}
-<section class="dashboard-section" id="section-overview">
+<section class="dashboard-section" id="section-overview"
+  hx-get="/dashboard/fragments/overview" hx-trigger="every 15s" hx-swap="outerHTML">
   <h2>System Overview</h2>
   <div class="stat-row">
     <div class="stat"><div class="value">{{ overview.total_requests }}</div><div class="label">Total Requests</div></div>

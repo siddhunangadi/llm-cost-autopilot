@@ -1,7 +1,8 @@
 {% if standalone %}
 <div id="last-updated" hx-swap-oob="true" class="last-updated">Last updated: {{ now }} UTC</div>
 {% endif %}
-<section class="dashboard-section" id="section-providers">
+<section class="dashboard-section" id="section-providers"
+  hx-get="/dashboard/fragments/providers" hx-trigger="every 15s" hx-swap="outerHTML">
   <h2>Provider Health</h2>
   {% if not providers %}
   <p class="empty-state">No providers configured.</p>
