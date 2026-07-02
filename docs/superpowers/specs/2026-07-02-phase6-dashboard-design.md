@@ -363,6 +363,16 @@ design and must be kept in sync if either changes — this mirrors how
 than imported, keeping `dashboard_service.py` self-contained and not
 dependent on other routers' internals.
 
+**Post-v1.0 refactoring note:** this duplication (three response models
+defined independently in both a router module and `dashboard_service.py`)
+is a deliberate short-term tradeoff, not an oversight. A future phase
+could extract shared response models into `backend/api/models/`
+(e.g. `quality.py`, `learning.py`, `dashboard.py`) so routers and
+services both import from a common location instead of redefining
+structurally-identical models. Out of scope for Phase 6 — it would touch
+Phases 3/4's completed routers for no functional gain and risks
+unnecessary churn on working code.
+
 **`asyncio.to_thread`:** the underlying `DashboardRepository`/
 `ProviderManager`/`LearningService` methods are synchronous (SQLAlchemy
 session calls, dict lookups) — wrapping each in `asyncio.to_thread`
