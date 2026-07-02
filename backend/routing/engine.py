@@ -40,11 +40,17 @@ class RoutingEngine:
         self._strategies = strategies
         self._explanation_generator = explanation_generator
 
-    def route(self, prompt: str, strategy_name: str = "balanced") -> RoutingDecision:
+    def route(
+        self,
+        prompt: str,
+        strategy_name: str = "balanced",
+        exclude_providers: frozenset[str] = frozenset(),
+    ) -> RoutingDecision:
         features = self._analyzer.analyze(prompt)
         classification = self._classifier.classify(features)
 
         available = self._model_registry.get_available_models()
+        available = [m for m in available if m.provider not in exclude_providers]
         candidates = self._routing_policy.filter_candidates(classification.tier, available)
         if not candidates:
             raise NoEligibleModelError(

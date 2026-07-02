@@ -141,3 +141,26 @@ def test_route_raises_key_error_for_unknown_strategy(tmp_path):
     engine = _make_engine(tmp_path)
     with pytest.raises(KeyError):
         engine.route("Hello.", strategy_name="does-not-exist")
+
+
+def test_route_excludes_specified_provider(tmp_path):
+    engine = _make_engine(tmp_path, strategies={"cost": CostOptimizedStrategy()})
+
+    with pytest.raises(NoEligibleModelError):
+        engine.route("Hello.", strategy_name="cost", exclude_providers=frozenset({"openai"}))
+
+
+def test_route_exclude_providers_has_no_effect_on_unrelated_provider(tmp_path):
+    engine = _make_engine(tmp_path, strategies={"cost": CostOptimizedStrategy()})
+
+    decision = engine.route("Hello.", strategy_name="cost", exclude_providers=frozenset({"mock"}))
+
+    assert decision.selected_model in {"gpt-4o-mini", "gpt-4o"}
+
+
+def test_route_default_exclude_providers_is_empty(tmp_path):
+    engine = _make_engine(tmp_path, strategies={"cost": CostOptimizedStrategy()})
+
+    decision = engine.route("Hello.", strategy_name="cost")
+
+    assert decision.selected_model in {"gpt-4o-mini", "gpt-4o"}
