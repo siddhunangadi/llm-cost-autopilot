@@ -5,6 +5,7 @@ from fastapi import FastAPI
 
 from backend.analysis.prompt_analyzer import PromptAnalyzer
 from backend.api.routers.chat import router as chat_router
+from backend.api.routers.dashboard import router as dashboard_router
 from backend.api.routers.health import router as health_router
 from backend.api.routers.learning import router as learning_router
 from backend.api.routers.metrics import router as metrics_router
@@ -38,6 +39,8 @@ from backend.routing.strategies import (
     QualityOptimizedStrategy,
 )
 from backend.services.cost_estimator import DefaultCostEstimator
+from backend.services.dashboard_repository import DashboardRepository
+from backend.services.dashboard_service import DashboardService
 from backend.services.model_registry import ModelRegistry
 from backend.telemetry.logging import configure_logging, get_logger
 from backend.verification.config_loader import VerificationConfigLoader
@@ -45,7 +48,7 @@ from backend.verification.engine import JudgeEngine
 from backend.verification.judge import BaseJudge, JudgeVerdict, LLMJudge
 from backend.verification.service import VerificationService
 
-APP_VERSION = "0.5.0"
+APP_VERSION = "0.6.0"
 
 
 class _UnavailableJudge(BaseJudge):
@@ -164,6 +167,14 @@ async def lifespan(app: FastAPI):
         session_factory=session_factory,
     )
 
+    dashboard_repository = DashboardRepository(session_factory=session_factory)
+    dashboard_service = DashboardService(
+        provider_manager=provider_manager,
+        provider_executor=provider_executor,
+        learning_service=learning_service,
+        dashboard_repository=dashboard_repository,
+    )
+
     app.state.settings = settings
     app.state.event_bus = event_bus
     app.state.provider_manager = provider_manager
@@ -172,6 +183,7 @@ async def lifespan(app: FastAPI):
     app.state.chat_service = chat_service
     app.state.learning_service = learning_service
     app.state.provider_executor = provider_executor
+    app.state.dashboard_service = dashboard_service
     app.state.version = APP_VERSION
     app.state.start_time = time.time()
 
@@ -186,6 +198,7 @@ def create_app() -> FastAPI:
     app.include_router(verification_router, prefix="/v1")
     app.include_router(metrics_router, prefix="/v1")
     app.include_router(learning_router, prefix="/v1")
+    app.include_router(dashboard_router, prefix="/v1")
     return app
 
 
