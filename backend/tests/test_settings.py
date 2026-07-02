@@ -77,3 +77,13 @@ def test_settings_models_yaml_path_is_a_plain_path_string_not_parsed():
     # between config-loading and registry concerns.
     settings = Settings(_env_file=None, models_yaml_path="some/nonexistent/models.yaml")
     assert settings.models_yaml_path == "some/nonexistent/models.yaml"
+
+
+def test_settings_routing_config_path_default():
+    settings = Settings(_env_file=None)
+    assert settings.routing_config_path == "backend/config/routing.yaml"
+
+
+def test_settings_rejects_blank_routing_config_path():
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, routing_config_path="")

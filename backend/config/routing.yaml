@@ -1,0 +1,16 @@
+classifier:
+  simple_max: 1
+  medium_max: 3
+
+policy:
+  simple:
+    min_benchmark_score: 0.0
+  medium:
+    min_benchmark_score: 0.75
+  complex:
+    min_benchmark_score: 0.90
+
+balanced_strategy:
+  cost_weight: 0.3333333333333333
+  latency_weight: 0.3333333333333333
+  quality_weight: 0.3333333333333334
