@@ -7,6 +7,7 @@ from backend.api.dependencies import (
     AppStartTimeDep,
     AppVersionDep,
     ModelRegistryDep,
+    ProviderExecutorDep,
     ProviderManagerDep,
     SessionFactoryDep,
     SettingsDep,
@@ -21,6 +22,7 @@ def get_health(
     version: AppVersionDep,
     start_time: AppStartTimeDep,
     provider_manager: ProviderManagerDep,
+    provider_executor: ProviderExecutorDep,
     model_registry: ModelRegistryDep,
     session_factory: SessionFactoryDep,
 ):
@@ -37,6 +39,7 @@ def get_health(
         "environment": settings.environment,
         "database": database_status,
         "providers": provider_manager.list_providers(),
+        "circuits": provider_executor.circuit_states(),
         "loaded_models": len(model_registry.get_models()),
         "uptime_seconds": round(time.time() - start_time, 1),
     }
