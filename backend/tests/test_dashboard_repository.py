@@ -144,3 +144,60 @@ def test_get_failover_summary_excludes_events_outside_window(tmp_path):
     summary = repository.get_failover_summary(TimeWindow(days=7))
 
     assert summary.request_ids == []
+
+
+def test_get_quality_trend_buckets_by_day(tmp_path):
+    repository, session_factory = _make_repository(tmp_path)
+    now = datetime.now(timezone.utc)
+    day2 = now - timedelta(days=2)
+    with session_factory() as session:
+        session.add(RequestRow(request_id="req-a", prompt="hi", strategy="balanced"))
+        session.add(VerificationRow(
+            request_id="req-a", status=VerificationStatus.COMPLETED.value,
+            routing_model="gpt-4o-mini", routing_strategy="balanced", routing_complexity="simple",
+            score=0.9, passed=True, confidence=0.8, created_at=now,
+        ))
+        session.add(RequestRow(request_id="req-b", prompt="hi", strategy="balanced"))
+        session.add(VerificationRow(
+            request_id="req-b", status=VerificationStatus.COMPLETED.value,
+            routing_model="gpt-4o-mini", routing_strategy="balanced", routing_complexity="simple",
+            score=0.5, passed=False, confidence=0.6, created_at=now,
+        ))
+        session.add(RequestRow(request_id="req-c", prompt="hi", strategy="balanced"))
+        session.add(VerificationRow(
+            request_id="req-c", status=VerificationStatus.COMPLETED.value,
+            routing_model="gpt-4o-mini", routing_strategy="balanced", routing_complexity="simple",
+            score=1.0, passed=True, confidence=0.9, created_at=day2,
+        ))
+        session.add(RequestRow(request_id="req-failed", prompt="hi", strategy="balanced"))
+        session.add(VerificationRow(
+            request_id="req-failed", status=VerificationStatus.FAILED.value,
+            routing_model="gpt-4o-mini", routing_strategy="balanced", routing_complexity="simple",
+            error_type="ValidationError", error="bad json", created_at=now,
+        ))
+        session.commit()
+
+    buckets = repository.get_quality_trend(TimeWindow(days=7))
+
+    assert len(buckets) == 2
+    assert buckets[0].date < buckets[1].date
+    today_bucket = buckets[1]
+    assert today_bucket.average_score == pytest.approx(0.7)
+    assert today_bucket.pass_rate == pytest.approx(0.5)
+
+
+def test_get_quality_trend_excludes_data_outside_window(tmp_path):
+    repository, session_factory = _make_repository(tmp_path)
+    old = datetime.now(timezone.utc) - timedelta(days=30)
+    with session_factory() as session:
+        session.add(RequestRow(request_id="req-old", prompt="hi", strategy="balanced"))
+        session.add(VerificationRow(
+            request_id="req-old", status=VerificationStatus.COMPLETED.value,
+            routing_model="gpt-4o-mini", routing_strategy="balanced", routing_complexity="simple",
+            score=0.9, passed=True, confidence=0.8, created_at=old,
+        ))
+        session.commit()
+
+    buckets = repository.get_quality_trend(TimeWindow(days=7))
+
+    assert buckets == []

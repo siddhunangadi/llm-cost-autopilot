@@ -39,6 +39,13 @@ class CostBucketData:
 
 
 @dataclass(frozen=True)
+class QualityTrendBucket:
+    date: date
+    average_score: float
+    pass_rate: float
+
+
+@dataclass(frozen=True)
 class FailoverData:
     request_ids: list[str]
 
@@ -118,6 +125,29 @@ class DashboardRepository:
         return [
             CostBucketData(date=day, request_count=len(costs), total_cost=sum(costs))
             for day, costs in sorted(buckets.items())
+        ]
+
+    def get_quality_trend(self, window: TimeWindow) -> list[QualityTrendBucket]:
+        with self._session_factory() as session:
+            rows = (
+                session.query(VerificationRow)
+                .filter(VerificationRow.created_at >= window.cutoff)
+                .filter(VerificationRow.status == VerificationStatus.COMPLETED.value)
+                .all()
+            )
+
+        buckets: dict[date, list[VerificationRow]] = {}
+        for row in rows:
+            day = row.created_at.date()
+            buckets.setdefault(day, []).append(row)
+
+        return [
+            QualityTrendBucket(
+                date=day,
+                average_score=_avg([r.score for r in group]),
+                pass_rate=_avg([1.0 if r.passed else 0.0 for r in group]),
+            )
+            for day, group in sorted(buckets.items())
         ]
 
     def get_failover_summary(self, window: TimeWindow) -> FailoverData:
