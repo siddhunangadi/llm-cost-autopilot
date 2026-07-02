@@ -86,17 +86,44 @@ instantiate services directly, and nothing runs at import time.
 `GET /v1/health` and `GET /v1/models` only report current state; neither
 triggers a provider health check or a registry reload.
 
-## Routing
-
-_Not built yet — Phase 2._
-
 ## Classification
 
-_Not built yet — Phase 3._
+`PromptAnalyzer.analyze()` extracts a deterministic `PromptFeatures` from
+a prompt (regex/keyword-based, no ML) — including `estimated_output_tokens`,
+which uses explicit brevity/word-count/long-form signals rather than
+assuming output length mirrors input length. `HeuristicComplexityClassifier`
+(behind `BaseComplexityClassifier`) turns those features into a
+`ClassificationResult` (tier, score, confidence, human-readable `signals`)
+via an additive, YAML-configurable threshold score — designed so a future
+ML classifier is a drop-in replacement with zero call-site changes.
+
+## Routing
+
+`RoutingPolicy` filters `ModelRegistry`'s available models by a
+per-complexity-tier minimum `benchmark_score` (YAML-configurable) — the
+engine never hardcodes eligibility. Four strategies
+(`CostOptimizedStrategy`, `LatencyOptimizedStrategy`,
+`QualityOptimizedStrategy`, `BalancedStrategy`) implement
+`BaseRoutingStrategy.select_model(context: RoutingContext) -> ModelSpec`;
+`BalancedStrategy`'s weights are also YAML-configurable, defaulting to
+equal thirds. `ExplanationGenerator` builds the human-readable reasoning
+from the classifier's own `signals` rather than rediscovering them, kept
+entirely separate from `RoutingEngine` so the orchestrator never
+accumulates conditional string-building. `RoutingEngine` is pure
+orchestration — it never calls a provider or touches the database.
+`RoutingConfigLoader` is the single owner of `routing.yaml` file I/O;
+`ClassifierPolicy`, `RoutingPolicy`, and `BalancedStrategy` all receive
+already-parsed, already-validated configuration.
+
+`ChatService` is the one component that calls both `RoutingEngine` and a
+provider: it routes, persists the request + routing event immediately,
+calls `provider.generate()`, and persists the response (or the error, on
+`ProviderError`, before re-raising). `POST /v1/chat` is a thin HTTP layer
+mapping `NoEligibleModelError` → 503 and `ProviderError` → 502.
 
 ## Verification
 
-_Not built yet — Phase 4._
+_Not built yet — Phase 3._
 
 ## Learning
 

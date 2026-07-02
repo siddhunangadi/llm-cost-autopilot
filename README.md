@@ -7,6 +7,11 @@ bus for an intelligent cost-aware LLM routing layer.
 
 - `GET /v1/health` — service, database, and provider status
 - `GET /v1/models` — full model registry (pricing, limits, capabilities, benchmark info)
+- `POST /v1/chat` — routes a prompt through prompt analysis, heuristic
+  complexity classification, and a configurable strategy (`cost`,
+  `latency`, `quality`, `balanced`) to select a model, then returns the
+  response plus a full routing explanation (complexity, confidence,
+  estimated cost/latency, human-readable reasoning)
 - `ModelRegistry` — memory-first, backed by `backend/config/models.yaml` and persisted to SQLite; immutable read-only cache, atomic `reload()`/`refresh_provider_status()`, fails fast on malformed/invalid/duplicate config
 - `OpenAIProvider` and `MockProvider` behind a shared `BaseProvider` interface; SDK exceptions are translated into `ProviderError`, never leaked to the rest of the app
 - `ProviderManager` — the mandatory `mock` provider crashes startup if it fails to construct; the optional `openai` provider degrades gracefully to "disabled" (logged) if its construction fails
@@ -84,3 +89,31 @@ curl http://127.0.0.1:8000/v1/models
 `providers` shows `"disabled"` and `available` is `false` above because no
 `OPENAI_API_KEY` was configured when this was captured — set one in `.env`
 to see `"available"`/`true`.
+
+`POST /v1/chat`:
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Explain why the sky is blue.", "strategy": "balanced"}'
+```
+
+```json
+{
+  "request_id": "b3f1...",
+  "response": "...",
+  "routing": {
+    "selected_model": "gpt-4o-mini",
+    "strategy": "balanced",
+    "complexity": "simple",
+    "confidence": 0.66,
+    "estimated_cost": 0.00013,
+    "estimated_latency_ms": 450.0,
+    "reasoning": [
+      "Classified as simple (confidence 0.66): reasoning keywords detected.",
+      "Strategy 'balanced' evaluated 2 eligible model(s).",
+      "Selected 'gpt-4o-mini'."
+    ]
+  }
+}
+```
