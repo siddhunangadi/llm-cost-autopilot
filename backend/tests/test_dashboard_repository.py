@@ -281,3 +281,40 @@ def test_get_recent_requests_respects_limit(tmp_path):
     requests = repository.get_recent_requests(limit=3)
 
     assert len(requests) == 3
+
+
+def test_get_cost_by_model_sums_cost_per_model(tmp_path):
+    repository, session_factory = _make_repository(tmp_path)
+    now = datetime.now(timezone.utc)
+    with session_factory() as session:
+        session.add(RequestRow(request_id="req-a", prompt="hi", strategy="balanced"))
+        session.add(_routing_event("req-a", now, model="gpt-4o-mini"))
+        session.add(ResponseRow(request_id="req-a", response_text="ok", actual_cost=0.10, created_at=now))
+
+        session.add(RequestRow(request_id="req-b", prompt="hi", strategy="balanced"))
+        session.add(_routing_event("req-b", now, model="gpt-4o-mini"))
+        session.add(ResponseRow(request_id="req-b", response_text="ok", actual_cost=0.05, created_at=now))
+
+        session.add(RequestRow(request_id="req-c", prompt="hi", strategy="balanced"))
+        session.add(_routing_event("req-c", now, model="gpt-4o"))
+        session.add(ResponseRow(request_id="req-c", response_text="ok", actual_cost=0.30, created_at=now))
+        session.commit()
+
+    totals = repository.get_cost_by_model(TimeWindow(days=7))
+
+    assert totals["gpt-4o-mini"] == pytest.approx(0.15)
+    assert totals["gpt-4o"] == pytest.approx(0.30)
+
+
+def test_get_cost_by_model_excludes_data_outside_window(tmp_path):
+    repository, session_factory = _make_repository(tmp_path)
+    old = datetime.now(timezone.utc) - timedelta(days=30)
+    with session_factory() as session:
+        session.add(RequestRow(request_id="req-old", prompt="hi", strategy="balanced"))
+        session.add(_routing_event("req-old", old, model="gpt-4o-mini"))
+        session.add(ResponseRow(request_id="req-old", response_text="ok", actual_cost=0.10, created_at=old))
+        session.commit()
+
+    totals = repository.get_cost_by_model(TimeWindow(days=7))
+
+    assert totals == {}

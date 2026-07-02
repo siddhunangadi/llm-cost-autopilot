@@ -147,6 +147,32 @@ class DashboardRepository:
             for day, costs in sorted(buckets.items())
         ]
 
+    def get_cost_by_model(self, window: TimeWindow) -> dict[str, float]:
+        with self._session_factory() as session:
+            responses = (
+                session.query(ResponseRow)
+                .filter(ResponseRow.created_at >= window.cutoff)
+                .filter(ResponseRow.actual_cost.isnot(None))
+                .all()
+            )
+            request_ids = [r.request_id for r in responses]
+            routing_events = (
+                session.query(RoutingEventRow)
+                .filter(RoutingEventRow.request_id.in_(request_ids))
+                .order_by(RoutingEventRow.created_at)
+                .all()
+            )
+
+        latest_model: dict[str, str] = {}
+        for row in routing_events:
+            latest_model[row.request_id] = row.selected_model
+
+        totals: dict[str, float] = {}
+        for response in responses:
+            model = latest_model.get(response.request_id, "unknown")
+            totals[model] = totals.get(model, 0.0) + response.actual_cost
+        return totals
+
     def get_quality_trend(self, window: TimeWindow) -> list[QualityTrendBucket]:
         with self._session_factory() as session:
             rows = (
