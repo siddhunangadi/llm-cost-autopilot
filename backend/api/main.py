@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from backend.analysis.prompt_analyzer import PromptAnalyzer
 from backend.api.routers.chat import router as chat_router
 from backend.api.routers.health import router as health_router
+from backend.api.routers.learning import router as learning_router
 from backend.api.routers.metrics import router as metrics_router
 from backend.api.routers.models import router as models_router
 from backend.api.routers.verification import router as verification_router
@@ -15,6 +16,10 @@ from backend.config.settings import Settings
 from backend.database.base import create_engine_from_settings, create_session_factory, init_db
 from backend.events.bus import EventBus
 from backend.events.subscribers import register_logging_subscriber
+from backend.learning.detector import FailurePatternDetector
+from backend.learning.generator import RecommendationGenerator
+from backend.learning.rules import ComplexityTierRule, DetectionRuleConfig, ModelComplexityRule
+from backend.learning.service import LearningService
 from backend.providers.factory import ProviderFactory
 from backend.providers.manager import ProviderManager
 from backend.providers.mock_provider import MockProvider
@@ -138,12 +143,23 @@ async def lifespan(app: FastAPI):
         verification_service=verification_service,
     )
 
+    detector = FailurePatternDetector(rules=[
+        ModelComplexityRule(DetectionRuleConfig(min_samples=20, pass_rate_threshold=0.6)),
+        ComplexityTierRule(DetectionRuleConfig(min_samples=30, pass_rate_threshold=0.5)),
+    ])
+    learning_service = LearningService(
+        detector=detector,
+        generator=RecommendationGenerator(),
+        session_factory=session_factory,
+    )
+
     app.state.settings = settings
     app.state.event_bus = event_bus
     app.state.provider_manager = provider_manager
     app.state.model_registry = model_registry
     app.state.session_factory = session_factory
     app.state.chat_service = chat_service
+    app.state.learning_service = learning_service
     app.state.version = APP_VERSION
     app.state.start_time = time.time()
 
@@ -157,6 +173,7 @@ def create_app() -> FastAPI:
     app.include_router(chat_router, prefix="/v1")
     app.include_router(verification_router, prefix="/v1")
     app.include_router(metrics_router, prefix="/v1")
+    app.include_router(learning_router, prefix="/v1")
     return app
 
 

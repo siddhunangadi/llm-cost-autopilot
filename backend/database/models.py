@@ -110,3 +110,25 @@ class VerificationRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class RecommendationRow(Base):
+    __tablename__ = "learning_recommendations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    signature: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    rule_type: Mapped[str] = mapped_column(String, nullable=False)
+    subject: Mapped[str] = mapped_column(String, nullable=False)
+
+    recommendation_text: Mapped[str] = mapped_column(String, nullable=False)
+    evidence_confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    severity: Mapped[str] = mapped_column(String, nullable=False)
+    evidence: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+    status: Mapped[str] = mapped_column(String, nullable=False, default="new")
+    source: Mapped[str] = mapped_column(String, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
