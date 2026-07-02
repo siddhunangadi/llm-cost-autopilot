@@ -48,6 +48,46 @@ def test_refresh_inserts_new_recommendation(tmp_path):
     assert results[0].status == "new"
 
 
+def test_get_recommendations_returns_persisted_rows_without_recomputing(tmp_path):
+    service, session_factory = _make_service(tmp_path)
+    _seed_failing_model(session_factory)
+    service.refresh_recommendations()
+
+    with session_factory() as session:
+        row = session.query(RecommendationRow).filter_by(
+            signature="model_complexity:gpt-4o-mini:medium"
+        ).one()
+        row.recommendation_text = "manually edited, should not be overwritten"
+        session.commit()
+
+    # Seed more failing data that WOULD change the recommendation text if
+    # get_recommendations() recomputed -- it must not.
+    _seed_failing_model(session_factory, count=20, passed_count=2, prefix="req2")
+
+    results = service.get_recommendations()
+
+    assert len(results) == 1
+    assert results[0].recommendation_text == "manually edited, should not be overwritten"
+
+
+def test_get_recommendations_ordering_matches_refresh(tmp_path):
+    service, session_factory = _make_service(tmp_path)
+    _seed_failing_model(session_factory)
+    refreshed = service.refresh_recommendations()
+
+    results = service.get_recommendations()
+
+    assert [r.signature for r in results] == [r.signature for r in refreshed]
+
+
+def test_get_recommendations_returns_empty_list_when_none_persisted(tmp_path):
+    service, _ = _make_service(tmp_path)
+
+    results = service.get_recommendations()
+
+    assert results == []
+
+
 def test_refresh_is_idempotent_no_duplicates(tmp_path):
     service, session_factory = _make_service(tmp_path)
     _seed_failing_model(session_factory)
