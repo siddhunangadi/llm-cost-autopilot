@@ -1,0 +1,115 @@
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
+
+from backend.api.dependencies import (
+    AppVersionDep, CredentialStoreDep, ProviderFactoryDep, ProviderManagerDep,
+)
+from backend.api.paths import TEMPLATES_DIR
+from backend.providers.manager import KNOWN_PROVIDER_NAMES
+from backend.services.credential_store import ProviderConfigStatus, ProviderCredential
+
+router = APIRouter(prefix="/v1/providers")
+page_router = APIRouter()
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+
+def _now_str() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+class ProviderConfigRequest(BaseModel):
+    api_key: str | None = None
+    base_url: str | None = None
+
+
+class ProviderConfigResult(BaseModel):
+    saved: bool
+    activated: bool
+    reason: str | None = None
+
+
+def _require_known(name: str) -> None:
+    if name not in KNOWN_PROVIDER_NAMES:
+        raise HTTPException(status_code=404, detail=f"Unknown provider '{name}'")
+
+
+@router.post("/{name}/config", response_model=ProviderConfigResult)
+async def save_provider_config(
+    name: str, body: ProviderConfigRequest,
+    credential_store: CredentialStoreDep, provider_manager: ProviderManagerDep,
+    provider_factory: ProviderFactoryDep,
+) -> ProviderConfigResult:
+    _require_known(name)
+    candidate = ProviderCredential(provider_name=name, api_key=body.api_key, base_url=body.base_url)
+    provider = provider_factory.create(name, candidate)
+    healthy = await provider.health_check()
+    if not healthy:
+        credential_store.record_health_check_failure(name, "health check failed")
+        return ProviderConfigResult(saved=False, activated=False, reason="health check failed")
+    credential_store.save(name, api_key=body.api_key, base_url=body.base_url)
+    provider_manager.reload_provider(name)
+    return ProviderConfigResult(saved=True, activated=True)
+
+
+@router.delete("/{name}/config", response_model=ProviderConfigResult)
+async def delete_provider_config(
+    name: str, credential_store: CredentialStoreDep, provider_manager: ProviderManagerDep,
+) -> ProviderConfigResult:
+    _require_known(name)
+    credential_store.delete(name)
+    activated = provider_manager.reload_provider(name)
+    return ProviderConfigResult(saved=True, activated=activated)
+
+
+@router.post("/{name}/enable", response_model=ProviderConfigResult)
+async def enable_provider(
+    name: str, credential_store: CredentialStoreDep, provider_manager: ProviderManagerDep,
+) -> ProviderConfigResult:
+    _require_known(name)
+    credential_store.set_enabled(name, True)
+    activated = provider_manager.reload_provider(name)
+    return ProviderConfigResult(saved=True, activated=activated)
+
+
+@router.post("/{name}/disable", response_model=ProviderConfigResult)
+async def disable_provider(
+    name: str, credential_store: CredentialStoreDep, provider_manager: ProviderManagerDep,
+) -> ProviderConfigResult:
+    _require_known(name)
+    credential_store.set_enabled(name, False)
+    activated = provider_manager.reload_provider(name)
+    return ProviderConfigResult(saved=True, activated=activated)
+
+
+@router.post("/{name}/test", response_model=ProviderConfigResult)
+async def test_provider_config(
+    name: str, body: ProviderConfigRequest, provider_factory: ProviderFactoryDep,
+) -> ProviderConfigResult:
+    _require_known(name)
+    candidate = ProviderCredential(provider_name=name, api_key=body.api_key, base_url=body.base_url)
+    provider = provider_factory.create(name, candidate)
+    healthy = await provider.health_check()
+    return ProviderConfigResult(
+        saved=False, activated=False, reason=None if healthy else "health check failed",
+    )
+
+
+@router.get("/config", response_model=list[ProviderConfigStatus])
+async def list_provider_config(
+    credential_store: CredentialStoreDep, provider_manager: ProviderManagerDep,
+) -> list[ProviderConfigStatus]:
+    return credential_store.list_status(provider_manager.is_provider_available)
+
+
+@page_router.get("/dashboard/providers")
+async def providers_page(
+    request: Request, credential_store: CredentialStoreDep,
+    provider_manager: ProviderManagerDep, app_version: AppVersionDep,
+):
+    statuses = credential_store.list_status(provider_manager.is_provider_available)
+    return templates.TemplateResponse(request, "providers.html", {
+        "statuses": statuses, "app_version": app_version, "now": _now_str(),
+    })

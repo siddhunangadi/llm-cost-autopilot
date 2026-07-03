@@ -14,6 +14,8 @@ from backend.api.routers.health import router as health_router
 from backend.api.routers.learning import router as learning_router
 from backend.api.routers.metrics import router as metrics_router
 from backend.api.routers.models import router as models_router
+from backend.api.routers.providers_config import page_router as providers_page_router
+from backend.api.routers.providers_config import router as providers_config_router
 from backend.api.routers.verification import router as verification_router
 from backend.chat.service import ChatService
 from backend.classifier.complexity_classifier import HeuristicComplexityClassifier
@@ -27,11 +29,13 @@ from backend.learning.rules import (
     ComplexityTierRule, DetectionRuleConfig, ModelComplexityRule, OverpoweredModelRule,
 )
 from backend.learning.service import LearningService
+from backend.providers.anthropic_provider import AnthropicProvider
 from backend.providers.circuit_breaker import CircuitBreaker
 from backend.providers.executor import ProviderExecutor
 from backend.providers.factory import ProviderFactory
 from backend.providers.manager import KNOWN_PROVIDER_NAMES, ProviderManager
 from backend.providers.mock_provider import MockProvider
+from backend.providers.ollama_provider import OllamaProvider
 from backend.providers.openai_provider import OpenAIProvider
 from backend.providers.retry import ExponentialBackoffRetryPolicy
 from backend.routing.config_loader import RoutingConfigLoader
@@ -46,6 +50,7 @@ from backend.routing.strategies import (
 )
 from backend.services.analytics_service import AnalyticsService
 from backend.services.cost_estimator import DefaultCostEstimator
+from backend.services.credential_store import CredentialStore
 from backend.services.dashboard_repository import DashboardRepository
 from backend.services.dashboard_service import DashboardService
 from backend.services.model_registry import ModelRegistry
@@ -76,6 +81,8 @@ def _build_provider_factory() -> ProviderFactory:
     factory = ProviderFactory()
     factory.register("mock", MockProvider)
     factory.register("openai", OpenAIProvider)
+    factory.register("anthropic", AnthropicProvider)
+    factory.register("ollama", OllamaProvider)
     return factory
 
 
@@ -92,7 +99,9 @@ async def lifespan(app: FastAPI):
     init_db(engine)
     session_factory = create_session_factory(engine)
 
-    provider_manager = ProviderManager(_build_provider_factory(), settings)
+    credential_store = CredentialStore(session_factory=session_factory, settings=settings)
+    provider_factory = _build_provider_factory()
+    provider_manager = ProviderManager(provider_factory, credential_store)
 
     model_registry = ModelRegistry(
         provider_manager=provider_manager,
@@ -190,6 +199,8 @@ async def lifespan(app: FastAPI):
     app.state.settings = settings
     app.state.event_bus = event_bus
     app.state.provider_manager = provider_manager
+    app.state.provider_factory = provider_factory
+    app.state.credential_store = credential_store
     app.state.model_registry = model_registry
     app.state.session_factory = session_factory
     app.state.chat_service = chat_service
@@ -214,6 +225,8 @@ def create_app() -> FastAPI:
     app.include_router(dashboard_router, prefix="/v1")
     app.include_router(dashboard_ui_router)
     app.include_router(analytics_router)
+    app.include_router(providers_config_router)
+    app.include_router(providers_page_router)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     return app
 
