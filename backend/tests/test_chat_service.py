@@ -25,6 +25,7 @@ from backend.routing.explanation import ExplanationGenerator
 from backend.routing.policy import RoutingPolicy
 from backend.routing.strategies import BalancedStrategy
 from backend.services.cost_estimator import DefaultCostEstimator
+from backend.services.credential_store import CredentialStore
 from backend.services.model_registry import ModelRegistry
 from backend.verification.engine import JudgeEngine
 from backend.verification.judge import LLMJudge
@@ -72,7 +73,8 @@ def _make_chat_service(tmp_path, verification_service=None):
 
     factory = ProviderFactory()
     factory.register("mock", MockProvider)
-    provider_manager = ProviderManager(factory, settings)
+    credential_store = CredentialStore(session_factory=session_factory, settings=settings)
+    provider_manager = ProviderManager(factory, credential_store)
     provider_executor = ProviderExecutor(
         provider_manager=provider_manager,
         retry_policy=ExponentialBackoffRetryPolicy(max_attempts=3, sleep=_no_op_sleep),

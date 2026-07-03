@@ -17,6 +17,7 @@ from backend.routing.explanation import ExplanationGenerator
 from backend.routing.policy import RoutingPolicy
 from backend.routing.strategies import BalancedStrategy, CostOptimizedStrategy
 from backend.services.cost_estimator import DefaultCostEstimator
+from backend.services.credential_store import CredentialStore
 from backend.services.model_registry import ModelRegistry
 
 TWO_MODEL_YAML = textwrap.dedent("""
@@ -80,7 +81,8 @@ def _make_engine(tmp_path, openai_key="sk-test", strategies=None):
     factory = ProviderFactory()
     factory.register("mock", MockProvider)
     factory.register("openai", OpenAIProvider)
-    provider_manager = ProviderManager(factory, settings)
+    credential_store = CredentialStore(session_factory=session_factory, settings=settings)
+    provider_manager = ProviderManager(factory, credential_store)
 
     model_registry = ModelRegistry(
         provider_manager=provider_manager,

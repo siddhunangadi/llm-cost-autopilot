@@ -13,6 +13,7 @@ from backend.providers.manager import ProviderManager
 from backend.providers.mock_provider import MockProvider
 from backend.providers.openai_provider import OpenAIProvider
 from backend.services.cost_estimator import DefaultCostEstimator
+from backend.services.credential_store import CredentialStore
 from backend.services.model_registry import ModelRegistry
 
 SAMPLE_YAML = textwrap.dedent("""
@@ -119,7 +120,8 @@ def _make_registry(tmp_path, openai_key, yaml_text=SAMPLE_YAML):
     factory = ProviderFactory()
     factory.register("mock", MockProvider)
     factory.register("openai", OpenAIProvider)
-    provider_manager = ProviderManager(factory, settings)
+    credential_store = CredentialStore(session_factory=session_factory, settings=settings)
+    provider_manager = ProviderManager(factory, credential_store)
 
     return ModelRegistry(
         provider_manager=provider_manager,
