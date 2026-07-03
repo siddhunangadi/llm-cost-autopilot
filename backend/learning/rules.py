@@ -106,7 +106,7 @@ class OverpoweredModelRule(BaseDetectionRule):
             groups[(row.routing_model, row.routing_complexity)].append(row.passed)
 
         findings = []
-        for model, complexity in sorted(groups.keys(), key=lambda mc: f"{mc[0]}:{mc[1]}"):
+        for model, complexity in sorted(groups.keys()):
             outcomes = groups[(model, complexity)]
             sample_size = len(outcomes)
             if sample_size < self._config.min_samples:

@@ -183,5 +183,22 @@ def test_overpowered_model_rule_deterministic_ordering():
 
     findings = rule.evaluate(rows)
 
-    subjects = [f.subject for f in findings]
-    assert subjects == sorted(subjects)  # (model, complexity) ascending
+    expected_order = sorted([
+        ("gpt-4o-mini", "simple"), ("gpt-4o", "complex"), ("claude-3-haiku", "medium"),
+    ])
+    assert [f.subject for f in findings] == [f"{m}:{c}" for m, c in expected_order]
+
+
+def test_overpowered_model_rule_ordering_with_prefix_collision_models():
+    # "gpt-4o" is a string-prefix of "gpt-4o-mini" -- must sort by true tuple
+    # order, not by the formatted "model:complexity" string (where "-" < ":"
+    # in ASCII would incorrectly reorder these).
+    rows = (
+        [_row("gpt-4o-mini", "balanced", "simple", passed=True) for _ in range(20)]
+        + [_row("gpt-4o", "balanced", "complex", passed=True) for _ in range(20)]
+    )
+    rule = OverpoweredModelRule(DetectionRuleConfig(min_samples=20, pass_rate_threshold=0.7))
+
+    findings = rule.evaluate(rows)
+
+    assert [f.subject for f in findings] == ["gpt-4o:complex", "gpt-4o-mini:simple"]
