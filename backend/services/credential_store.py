@@ -117,6 +117,31 @@ class CredentialStore:
         fallback = _ENV_FALLBACK.get(provider_name)
         return fallback(self._settings) if fallback else None
 
+    def get_stored(self, provider_name: str) -> ProviderCredential | None:
+        """Raw stored credential material only -- no env fallback, and
+        unaffected by is_enabled. Used by callers that need to know what a
+        provider's saved key/base_url actually is regardless of whether it's
+        currently active (e.g. filling in the existing key for a Test
+        Connection / re-save when the caller didn't supply a new one), as
+        opposed to get()'s "what should be used to build an active
+        provider right now" semantics."""
+        with self._session_factory() as session:
+            row = (
+                session.query(ProviderCredentialRow)
+                .filter_by(provider_name=provider_name)
+                .first()
+            )
+        has_credential_material = row is not None and (
+            row.encrypted_api_key is not None or row.base_url is not None
+        )
+        if not has_credential_material:
+            return None
+        return ProviderCredential(
+            provider_name=provider_name,
+            api_key=self._decrypt(row.encrypted_api_key),
+            base_url=row.base_url,
+        )
+
     def save(
         self, provider_name: str, api_key: str | None, base_url: str | None,
     ) -> ProviderCredentialRow:

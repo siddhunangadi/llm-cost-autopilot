@@ -112,6 +112,29 @@ def test_disable_then_enable_provider_toggles_availability(tmp_path, monkeypatch
         assert listed["openai"]["is_enabled"] is True
 
 
+def test_test_connection_without_retyping_key_uses_stored_key(tmp_path, monkeypatch):
+    for client in _client(tmp_path, monkeypatch):
+        client.post("/v1/providers/openai/config", json={"api_key": "sk-test-123456"})
+
+        response = client.post("/v1/providers/openai/test", json={})
+
+        assert response.status_code == 200
+        assert response.json() == {"saved": False, "activated": False, "reason": None}
+
+
+def test_save_without_retyping_key_keeps_existing_credential(tmp_path, monkeypatch):
+    for client in _client(tmp_path, monkeypatch):
+        client.post("/v1/providers/openai/config", json={"api_key": "sk-test-123456"})
+
+        response = client.post("/v1/providers/openai/config", json={})
+
+        assert response.status_code == 200
+        assert response.json() == {"saved": True, "activated": True, "reason": None}
+        listed = {s["provider"]: s for s in client.get("/v1/providers/config").json()}
+        assert listed["openai"]["configured"] is True
+        assert listed["openai"]["masked_key"] is not None
+
+
 def test_disable_is_not_reactivated_by_env_var(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-env-fallback")
     for client in _client(tmp_path, monkeypatch):

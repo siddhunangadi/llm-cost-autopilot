@@ -36,6 +36,22 @@ def _require_known(name: str) -> None:
         raise HTTPException(status_code=404, detail=f"Unknown provider '{name}'")
 
 
+def _resolve_candidate(
+    name: str, body: ProviderConfigRequest, credential_store: CredentialStoreDep,
+) -> ProviderCredential:
+    """A blank field in the request means "unchanged", not "clear it" -- the
+    UI only ever shows a masked existing key as a placeholder, never as a
+    real value, so an omitted field must fall back to what's actually
+    stored rather than being sent through as None and wiping/failing on a
+    working credential."""
+    stored = credential_store.get_stored(name)
+    return ProviderCredential(
+        provider_name=name,
+        api_key=body.api_key if body.api_key is not None else (stored.api_key if stored else None),
+        base_url=body.base_url if body.base_url is not None else (stored.base_url if stored else None),
+    )
+
+
 @router.post("/{name}/config", response_model=ProviderConfigResult)
 async def save_provider_config(
     name: str, body: ProviderConfigRequest,
@@ -43,13 +59,13 @@ async def save_provider_config(
     provider_factory: ProviderFactoryDep,
 ) -> ProviderConfigResult:
     _require_known(name)
-    candidate = ProviderCredential(provider_name=name, api_key=body.api_key, base_url=body.base_url)
+    candidate = _resolve_candidate(name, body, credential_store)
     provider = provider_factory.create(name, candidate)
     healthy = await provider.health_check()
     if not healthy:
         credential_store.record_health_check_failure(name, "health check failed")
         return ProviderConfigResult(saved=False, activated=False, reason="health check failed")
-    credential_store.save(name, api_key=body.api_key, base_url=body.base_url)
+    credential_store.save(name, api_key=candidate.api_key, base_url=candidate.base_url)
     provider_manager.reload_provider(name)
     return ProviderConfigResult(saved=True, activated=True)
 
@@ -86,10 +102,11 @@ async def disable_provider(
 
 @router.post("/{name}/test", response_model=ProviderConfigResult)
 async def test_provider_config(
-    name: str, body: ProviderConfigRequest, provider_factory: ProviderFactoryDep,
+    name: str, body: ProviderConfigRequest,
+    credential_store: CredentialStoreDep, provider_factory: ProviderFactoryDep,
 ) -> ProviderConfigResult:
     _require_known(name)
-    candidate = ProviderCredential(provider_name=name, api_key=body.api_key, base_url=body.base_url)
+    candidate = _resolve_candidate(name, body, credential_store)
     provider = provider_factory.create(name, candidate)
     healthy = await provider.health_check()
     return ProviderConfigResult(

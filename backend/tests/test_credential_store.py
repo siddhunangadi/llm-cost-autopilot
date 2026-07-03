@@ -116,6 +116,29 @@ def test_record_health_check_failure_on_env_only_provider_still_falls_back_to_en
     assert store.get("openai").api_key == "sk-env"
 
 
+def test_get_stored_returns_material_even_when_disabled(tmp_path):
+    store, _ = _make_store(tmp_path)
+    store.save("openai", api_key="sk-db", base_url=None)
+    store.set_enabled("openai", False)
+
+    assert store.get("openai") is None
+    assert store.get_stored("openai").api_key == "sk-db"
+
+
+def test_get_stored_ignores_env_fallback(tmp_path):
+    store, _ = _make_store(tmp_path, openai_api_key="sk-env")
+
+    assert store.get("openai").api_key == "sk-env"
+    assert store.get_stored("openai") is None
+
+
+def test_get_stored_returns_none_for_failure_only_row(tmp_path):
+    store, _ = _make_store(tmp_path)
+    store.record_health_check_failure("openai", "auth failed")
+
+    assert store.get_stored("openai") is None
+
+
 def test_ollama_credential_has_no_api_key_only_base_url(tmp_path):
     store, _ = _make_store(tmp_path)
     store.save("ollama", api_key=None, base_url="http://localhost:11434")
