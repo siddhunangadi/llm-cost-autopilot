@@ -219,3 +219,19 @@ def test_generate_without_cost_metrics_argument_still_works_for_quality_findings
     )
     [rec] = RecommendationGenerator().generate([finding])  # no cost_metrics arg -- backward compatible
     assert rec.source == RecommendationSource.VERIFICATION
+
+
+def test_generate_cost_optimization_breaks_avg_cost_ties_by_model_name():
+    finding = Finding(
+        rule_type=RuleType.COST_OPTIMIZATION, subject="gpt-4o:complex",
+        sample_size=20, pass_rate=0.9, threshold=0.7,
+    )
+    cost_metrics = {
+        ("gpt-4o", "complex"): _metrics("gpt-4o", "complex", avg_cost=0.10),
+        ("gpt-4o-mini", "complex"): _metrics("gpt-4o-mini", "complex", avg_cost=0.02),
+        ("claude-3-haiku", "complex"): _metrics("claude-3-haiku", "complex", avg_cost=0.02),  # tied with gpt-4o-mini
+    }
+
+    [rec] = RecommendationGenerator().generate([finding], cost_metrics)
+
+    assert rec.evidence.comparison.suggested_model == "claude-3-haiku"  # alphabetically first among tied-cheapest

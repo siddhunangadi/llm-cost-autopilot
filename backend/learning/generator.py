@@ -124,7 +124,7 @@ class RecommendationGenerator:
         if not candidates:
             return None
 
-        best = min(candidates, key=lambda m: m.avg_cost_per_request)
+        best = min(candidates, key=lambda m: (m.avg_cost_per_request, m.model))
         if best.model == current.model:
             return None
         if current.avg_cost_per_request <= best.avg_cost_per_request:
