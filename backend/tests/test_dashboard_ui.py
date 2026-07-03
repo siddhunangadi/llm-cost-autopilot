@@ -3,7 +3,9 @@ from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 
 from backend.api.main import create_app
-from backend.database.models import RequestRow, ResponseRow, RoutingEventRow, VerificationRow
+from backend.database.models import (
+    RecommendationRow, RequestRow, ResponseRow, RoutingEventRow, VerificationRow,
+)
 from backend.verification.status import VerificationStatus
 
 
@@ -91,3 +93,37 @@ def test_dashboard_page_polled_sections_carry_htmx_polling_attributes(tmp_path, 
             assert f'hx-get="/dashboard/fragments/{section}"' in body
         assert 'hx-trigger="every 15s"' in body
         assert 'hx-swap="outerHTML"' in body
+
+
+def test_dashboard_renders_cost_optimization_recommendation(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/test.db")
+    app = create_app()
+    with TestClient(app) as client:
+        with app.state.session_factory() as session:
+            session.add(RecommendationRow(
+                signature="cost_optimization:gpt-4o:complex",
+                rule_type="cost_optimization",
+                subject="gpt-4o:complex",
+                recommendation_text=(
+                    "Current model 'gpt-4o' consistently meets the quality threshold for "
+                    "'complex' prompts. A lower-cost model, 'gpt-4o-mini', also meets the "
+                    "threshold. Estimated monthly savings: ~$21.00."
+                ),
+                evidence_confidence=0.6,
+                severity="high",
+                evidence={"sample_size": 20, "pass_rate": 0.9, "threshold": 0.7, "comparison": {
+                    "current_model": "gpt-4o", "suggested_model": "gpt-4o-mini",
+                    "current_pass_rate": 0.9, "suggested_pass_rate": 0.85,
+                    "current_cost_per_request": 0.10, "suggested_cost_per_request": 0.03,
+                    "estimated_monthly_savings": 21.00,
+                }},
+                status="new",
+                source="cost_optimization",
+            ))
+            session.commit()
+
+        response = client.get("/dashboard")
+
+        assert response.status_code == 200
+        assert "gpt-4o-mini" in response.text
+        assert "$21.00" in response.text

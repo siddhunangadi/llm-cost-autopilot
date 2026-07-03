@@ -22,7 +22,9 @@ from backend.events.bus import EventBus
 from backend.events.subscribers import register_logging_subscriber
 from backend.learning.detector import FailurePatternDetector
 from backend.learning.generator import RecommendationGenerator
-from backend.learning.rules import ComplexityTierRule, DetectionRuleConfig, ModelComplexityRule
+from backend.learning.rules import (
+    ComplexityTierRule, DetectionRuleConfig, ModelComplexityRule, OverpoweredModelRule,
+)
 from backend.learning.service import LearningService
 from backend.providers.circuit_breaker import CircuitBreaker
 from backend.providers.executor import ProviderExecutor
@@ -51,7 +53,7 @@ from backend.verification.engine import JudgeEngine
 from backend.verification.judge import BaseJudge, JudgeVerdict, LLMJudge
 from backend.verification.service import VerificationService
 
-APP_VERSION = "0.6.1"
+APP_VERSION = "0.7.0"
 
 
 class _UnavailableJudge(BaseJudge):
@@ -160,14 +162,18 @@ async def lifespan(app: FastAPI):
         verification_service=verification_service,
     )
 
+    cost_optimization_config = DetectionRuleConfig(min_samples=20, pass_rate_threshold=0.75)
     detector = FailurePatternDetector(rules=[
         ModelComplexityRule(DetectionRuleConfig(min_samples=20, pass_rate_threshold=0.6)),
         ComplexityTierRule(DetectionRuleConfig(min_samples=30, pass_rate_threshold=0.5)),
+        OverpoweredModelRule(cost_optimization_config),
     ])
     learning_service = LearningService(
         detector=detector,
         generator=RecommendationGenerator(),
         session_factory=session_factory,
+        model_registry=model_registry,
+        cost_optimization_config=cost_optimization_config,
     )
 
     dashboard_repository = DashboardRepository(session_factory=session_factory)
