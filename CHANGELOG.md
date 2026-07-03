@@ -3,6 +3,51 @@
 All notable changes to this project are documented here. Versions
 correspond to the `vX.Y.0` git tags marking the end of each phase.
 
+## v0.9.1 — Provider Expansion (2026-07-04)
+
+Adds five new LLM providers -- Google Gemini, NVIDIA NIM, OpenRouter, Groq,
+and Mistral AI -- all via a shared `OpenAIProtocolProvider` base class,
+since each exposes an OpenAI-compatible chat-completions API differing
+only in base_url and API key. `OpenAIProvider` is refactored to inherit
+from it with no behavior change. `ProviderFactory` becomes the single
+source of truth for which provider names exist: the two previously
+duplicated `KNOWN_PROVIDER_NAMES` tuples (in `manager.py` and
+`credential_store.py`) are removed, and every consumer now reads names
+from `ProviderFactory.registered_names()` (directly, or via
+`ProviderManager.registered_names()` / an injected `provider_names` tuple).
+
+**Added**
+- `OpenAIProtocolProvider` -- shared adapter for any OpenAI-compatible
+  provider; subclasses declare only `_NAME` and `_BASE_URL`
+- `GeminiProvider`, `NvidiaNimProvider`, `OpenRouterProvider`,
+  `GroqProvider`, `MistralProvider` -- registered in `ProviderFactory`
+  alongside the existing 4; configurable via Provider Configuration
+  (API key only -- base_url is fixed per provider, these are hosted
+  cloud APIs with one canonical endpoint) with `.env` fallback
+  (`GEMINI_API_KEY`, `NVIDIA_NIM_API_KEY`, `OPENROUTER_API_KEY`,
+  `GROQ_API_KEY`, `MISTRAL_API_KEY`)
+- `ProviderFactory.registered_names()` / `register(..., user_configurable=)`
+  -- the single source of truth for the user-facing provider set; `mock`
+  is registered `user_configurable=False` and stays internal-only
+- Six curated models across the new providers in `models.yaml`
+  (`gemini-2.5-pro`, `gemini-2.5-flash`, `llama-3.3-70b-versatile`,
+  `mistral-large-latest`, `meta/llama-3.3-70b-instruct`,
+  `openai/gpt-4.1-mini`) -- model ids stored exactly as each vendor's API
+  requires, no normalization layer
+
+**Changed**
+- `OpenAIProvider` now inherits from `OpenAIProtocolProvider`
+  (`_NAME="openai"`, `_BASE_URL=None`) -- behavior-preserving refactor,
+  verified by the full pre-existing `OpenAIProvider` test suite passing
+  unchanged
+- `CredentialStore.__init__` takes an explicit `provider_names` argument
+  instead of reading a module-level constant
+- `main.py`'s provider circuit-breaker map and `ProviderManager`
+  construction now derive their provider set from
+  `ProviderFactory.registered_names()`
+
+**Stats:** 455 tests passing (1 new), 0 regressions.
+
 ## v0.9.0 — Provider Configuration (2026-07-03)
 
 Replaces `.env`-only provider API keys with dashboard-managed,

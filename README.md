@@ -57,7 +57,7 @@ curl http://127.0.0.1:8000/v1/models
   "version": "0.1.0",
   "environment": "development",
   "database": "healthy",
-  "providers": {"openai": "disabled", "anthropic": "disabled", "ollama": "disabled"},
+  "providers": {"openai": "disabled", "anthropic": "disabled", "ollama": "disabled", "gemini": "disabled", "nvidia_nim": "disabled", "openrouter": "disabled", "groq": "disabled", "mistral": "disabled"},
   "loaded_models": 2,
   "uptime_seconds": 14.4
 }
