@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}LLM Cost Autopilot — Analytics{% endblock %}
+{% block content %}
+<main class="dashboard">
+  <nav class="dashboard-nav">
+    <a href="/dashboard">Operations Dashboard</a> | <a href="/dashboard/analytics">Analytics</a>
+  </nav>
+  <p class="last-updated">Report window: last {{ report.window_days }} days. Generated at {{ report.generated_at }}. <a href="/dashboard/analytics?days={{ report.window_days }}">Refresh</a></p>
+
+  <section class="dashboard-section" id="section-cost-trend">
+    <h2>Cost Trend</h2>
+    {% if not report.cost_trend %}
+    <p class="empty-state">No cost data yet.</p>
+    {% else %}
+    <canvas id="cost-trend-chart"></canvas>
+    <script>
+      new Chart(document.getElementById('cost-trend-chart'), {
+        type: 'line',
+        data: {
+          labels: {{ report.cost_trend | map(attribute='date') | map('string') | list | tojson }},
+          datasets: [{ label: 'Total cost/day', data: {{ report.cost_trend | map(attribute='total_cost') | list | tojson }} }],
+        },
+      });
+    </script>
+    {% endif %}
+  </section>
+
+  <section class="dashboard-section" id="section-quality-trend">
+    <h2>Quality Trend</h2>
+    {% if not report.quality_trend %}
+    <p class="empty-state">No verification results available.</p>
+    {% else %}
+    <canvas id="quality-trend-chart"></canvas>
+    <script>
+      new Chart(document.getElementById('quality-trend-chart'), {
+        type: 'line',
+        data: {
+          labels: {{ report.quality_trend | map(attribute='date') | map('string') | list | tojson }},
+          datasets: [
+            { label: 'Pass rate', data: {{ report.quality_trend | map(attribute='pass_rate') | list | tojson }} },
+            { label: 'Average score', data: {{ report.quality_trend | map(attribute='average_score') | list | tojson }} },
+          ],
+        },
+      });
+    </script>
+    {% endif %}
+  </section>
+
+  <section class="dashboard-section" id="section-routing-distribution">
+    <h2>Routing Distribution</h2>
+    {% if not report.routing_distribution %}
+    <p class="empty-state">No routing data yet.</p>
+    {% else %}
+    <canvas id="routing-distribution-chart"></canvas>
+    <script>
+      new Chart(document.getElementById('routing-distribution-chart'), {
+        type: 'bar',
+        data: {{ routing_chart | tojson }},
+      });
+    </script>
+    {% endif %}
+  </section>
+
+  <section class="dashboard-section" id="section-failover-trend">
+    <h2>Failover Trend</h2>
+    {% if not report.failover_trend %}
+    <p class="empty-state">No failovers recorded.</p>
+    {% else %}
+    <canvas id="failover-trend-chart"></canvas>
+    <script>
+      new Chart(document.getElementById('failover-trend-chart'), {
+        type: 'bar',
+        data: {
+          labels: {{ report.failover_trend | map(attribute='date') | map('string') | list | tojson }},
+          datasets: [{ label: 'Failovers/day', data: {{ report.failover_trend | map(attribute='failover_count') | list | tojson }} }],
+        },
+      });
+    </script>
+    {% endif %}
+  </section>
+
+  <section class="dashboard-section" id="section-recommendation-trend">
+    <h2>Recommendation Trend</h2>
+    {% if not report.recommendation_trend %}
+    <p class="empty-state">No recommendations yet.</p>
+    {% else %}
+    <canvas id="recommendation-trend-chart"></canvas>
+    <script>
+      new Chart(document.getElementById('recommendation-trend-chart'), {
+        type: 'line',
+        data: {
+          labels: {{ report.recommendation_trend | map(attribute='date') | map('string') | list | tojson }},
+          datasets: [
+            { label: 'Generated/day', data: {{ report.recommendation_trend | map(attribute='generated_count') | list | tojson }} },
+            { label: 'Still open', data: {{ report.recommendation_trend | map(attribute='open_count') | list | tojson }} },
+          ],
+        },
+      });
+    </script>
+    {% endif %}
+  </section>
+</main>
+{% endblock %}

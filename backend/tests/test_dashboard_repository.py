@@ -4,7 +4,9 @@ import pytest
 
 from backend.config.settings import Settings
 from backend.database.base import create_engine_from_settings, create_session_factory, init_db
-from backend.database.models import RequestRow, ResponseRow, RoutingEventRow, VerificationRow
+from backend.database.models import (
+    RecommendationRow, RequestRow, ResponseRow, RoutingEventRow, VerificationRow,
+)
 from backend.services.dashboard_repository import DashboardRepository, TimeWindow
 from backend.verification.status import VerificationStatus
 
@@ -318,3 +320,119 @@ def test_get_cost_by_model_excludes_data_outside_window(tmp_path):
     totals = repository.get_cost_by_model(TimeWindow(days=7))
 
     assert totals == {}
+
+
+def test_get_failover_trend_counts_failovers_per_day(tmp_path):
+    repository, session_factory = _make_repository(tmp_path)
+    now = datetime.now(timezone.utc)
+    with session_factory() as session:
+        # req-failover-1: two routing events same day -> 1 failover today
+        session.add(RequestRow(request_id="req-failover-1", prompt="hi", strategy="balanced"))
+        session.add(_routing_event("req-failover-1", now, model="gpt-4o-mini"))
+        session.add(_routing_event("req-failover-1", now + timedelta(seconds=1), model="gpt-4o"))
+
+        # req-single: only one routing event -> not a failover
+        session.add(RequestRow(request_id="req-single", prompt="hi", strategy="balanced"))
+        session.add(_routing_event("req-single", now))
+
+        # req-failover-2: two routing events yesterday -> 1 failover yesterday
+        yesterday = now - timedelta(days=1)
+        session.add(RequestRow(request_id="req-failover-2", prompt="hi", strategy="balanced"))
+        session.add(_routing_event("req-failover-2", yesterday, model="gpt-4o-mini"))
+        session.add(_routing_event("req-failover-2", yesterday + timedelta(seconds=1), model="gpt-4o"))
+        session.commit()
+
+    buckets = repository.get_failover_trend(TimeWindow(days=7))
+
+    by_date = {b.date: b.failover_count for b in buckets}
+    assert by_date[now.date()] == 1
+    assert by_date[yesterday.date()] == 1
+
+
+def test_get_failover_trend_excludes_events_outside_window(tmp_path):
+    repository, session_factory = _make_repository(tmp_path)
+    now = datetime.now(timezone.utc)
+    old = now - timedelta(days=30)
+    with session_factory() as session:
+        session.add(RequestRow(request_id="req-old", prompt="hi", strategy="balanced"))
+        session.add(_routing_event("req-old", old, model="gpt-4o-mini"))
+        session.add(_routing_event("req-old", old + timedelta(seconds=1), model="gpt-4o"))
+        session.commit()
+
+    buckets = repository.get_failover_trend(TimeWindow(days=7))
+
+    assert buckets == []
+
+
+def test_get_routing_distribution_groups_by_day_and_model(tmp_path):
+    repository, session_factory = _make_repository(tmp_path)
+    now = datetime.now(timezone.utc)
+    with session_factory() as session:
+        session.add(RequestRow(request_id="req-1", prompt="hi", strategy="balanced"))
+        session.add(_routing_event("req-1", now, model="gpt-4o-mini"))
+        session.add(RequestRow(request_id="req-2", prompt="hi", strategy="balanced"))
+        session.add(_routing_event("req-2", now, model="gpt-4o-mini"))
+        session.add(RequestRow(request_id="req-3", prompt="hi", strategy="balanced"))
+        session.add(_routing_event("req-3", now, model="gpt-4o"))
+        session.commit()
+
+    buckets = repository.get_routing_distribution(TimeWindow(days=7))
+
+    counts = {(b.date, b.model): b.request_count for b in buckets}
+    assert counts[(now.date(), "gpt-4o-mini")] == 2
+    assert counts[(now.date(), "gpt-4o")] == 1
+
+
+def test_get_routing_distribution_excludes_events_outside_window(tmp_path):
+    repository, session_factory = _make_repository(tmp_path)
+    now = datetime.now(timezone.utc)
+    old = now - timedelta(days=30)
+    with session_factory() as session:
+        session.add(RequestRow(request_id="req-old", prompt="hi", strategy="balanced"))
+        session.add(_routing_event("req-old", old, model="gpt-4o-mini"))
+        session.commit()
+
+    buckets = repository.get_routing_distribution(TimeWindow(days=7))
+
+    assert buckets == []
+
+
+def test_get_recommendation_trend_counts_generated_and_open_per_day(tmp_path):
+    repository, session_factory = _make_repository(tmp_path)
+    now = datetime.now(timezone.utc)
+    with session_factory() as session:
+        session.add(RecommendationRow(
+            signature="sig-1", rule_type="model_complexity", subject="gpt-4o-mini",
+            recommendation_text="text", evidence_confidence=0.9, severity="low",
+            evidence={}, status="new", source="rule_based", created_at=now,
+        ))
+        session.add(RecommendationRow(
+            signature="sig-2", rule_type="model_complexity", subject="gpt-4o",
+            recommendation_text="text", evidence_confidence=0.9, severity="low",
+            evidence={}, status="acknowledged", source="rule_based", created_at=now,
+        ))
+        session.commit()
+
+    buckets = repository.get_recommendation_trend(TimeWindow(days=7))
+
+    assert len(buckets) == 1
+    assert buckets[0].date == now.date()
+    assert buckets[0].generated_count == 2
+    assert buckets[0].open_count == 1  # only sig-1 is still status="new"
+
+
+def test_get_recommendation_trend_excludes_recommendations_outside_window(tmp_path):
+    repository, session_factory = _make_repository(tmp_path)
+    now = datetime.now(timezone.utc)
+    old = now - timedelta(days=30)
+    with session_factory() as session:
+        session.add(RecommendationRow(
+            signature="sig-old", rule_type="model_complexity", subject="gpt-4o-mini",
+            recommendation_text="text", evidence_confidence=0.9, severity="low",
+            evidence={}, status="new", source="rule_based", created_at=old,
+        ))
+        session.commit()
+
+    buckets = repository.get_recommendation_trend(TimeWindow(days=7))
+
+    assert buckets == []

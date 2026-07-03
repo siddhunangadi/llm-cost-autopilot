@@ -1,6 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
 <main class="dashboard">
+  <nav class="dashboard-nav">
+    <a href="/dashboard">Operations Dashboard</a> | <a href="/dashboard/analytics">Analytics</a>
+  </nav>
   {% include "fragments/overview.html" %}
   {% include "fragments/providers.html" %}
 

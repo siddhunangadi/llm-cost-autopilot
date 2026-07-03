@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.analysis.prompt_analyzer import PromptAnalyzer
 from backend.api.paths import STATIC_DIR
+from backend.api.routers.analytics import router as analytics_router
 from backend.api.routers.chat import router as chat_router
 from backend.api.routers.dashboard import router as dashboard_router
 from backend.api.routers.dashboard_ui import router as dashboard_ui_router
@@ -43,6 +44,7 @@ from backend.routing.strategies import (
     LatencyOptimizedStrategy,
     QualityOptimizedStrategy,
 )
+from backend.services.analytics_service import AnalyticsService
 from backend.services.cost_estimator import DefaultCostEstimator
 from backend.services.dashboard_repository import DashboardRepository
 from backend.services.dashboard_service import DashboardService
@@ -53,7 +55,7 @@ from backend.verification.engine import JudgeEngine
 from backend.verification.judge import BaseJudge, JudgeVerdict, LLMJudge
 from backend.verification.service import VerificationService
 
-APP_VERSION = "0.7.0"
+APP_VERSION = "0.8.0"
 
 
 class _UnavailableJudge(BaseJudge):
@@ -183,6 +185,7 @@ async def lifespan(app: FastAPI):
         learning_service=learning_service,
         dashboard_repository=dashboard_repository,
     )
+    analytics_service = AnalyticsService(dashboard_repository=dashboard_repository)
 
     app.state.settings = settings
     app.state.event_bus = event_bus
@@ -193,6 +196,7 @@ async def lifespan(app: FastAPI):
     app.state.learning_service = learning_service
     app.state.provider_executor = provider_executor
     app.state.dashboard_service = dashboard_service
+    app.state.analytics_service = analytics_service
     app.state.version = APP_VERSION
     app.state.start_time = time.time()
 
@@ -209,6 +213,7 @@ def create_app() -> FastAPI:
     app.include_router(learning_router, prefix="/v1")
     app.include_router(dashboard_router, prefix="/v1")
     app.include_router(dashboard_ui_router)
+    app.include_router(analytics_router)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     return app
 
