@@ -88,7 +88,19 @@ class ChatService:
 
             decision, spec = failover_decision, new_spec
 
-        provider = self._provider_manager.get_provider(spec.provider)
+        try:
+            provider = self._provider_manager.get_provider(spec.provider)
+        except ProviderError:
+            # Generation already succeeded -- this is only for tokenizing
+            # the prompt/response we already have for cost accounting. If
+            # the provider was disabled/deleted concurrently in the window
+            # since generate() returned, fall back to "mock" (always
+            # present) rather than turning an already-successful response
+            # into an unhandled 500.
+            self._logger.warning(
+                "provider_unavailable_for_cost_accounting", extra={"provider": spec.provider}
+            )
+            provider = self._provider_manager.get_provider("mock")
         input_tokens = provider.count_tokens(prompt)
         output_tokens = provider.count_tokens(response_text)
         actual_cost = self._model_registry.estimate_cost(spec.id, input_tokens, output_tokens)

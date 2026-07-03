@@ -54,9 +54,14 @@ class ProviderExecutor:
                 retry_after_seconds=breaker.retry_after_seconds(),
             )
 
-        provider = self._provider_manager.get_provider(provider_name)
-
         async def operation() -> str:
+            # Resolved inside the retry-guarded closure (not once up front)
+            # so a provider that's disabled/deleted/reloaded mid-request --
+            # including between individual retry attempts -- raises
+            # ProviderUnavailableError (a ProviderError) here, where it's
+            # already handled by the except clause below, instead of a bare
+            # KeyError escaping as an unhandled 500.
+            provider = self._provider_manager.get_provider(provider_name)
             return await provider.generate(prompt, model=model)
 
         prior_state = breaker.state

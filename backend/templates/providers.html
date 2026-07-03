@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}LLM Cost Autopilot — Providers{% endblock %}
+{% block content %}
+<main class="dashboard">
+  <nav class="dashboard-nav">
+    <a href="/dashboard">Operations Dashboard</a> | <a href="/dashboard/analytics">Analytics</a> | <a href="/dashboard/providers">Providers</a>
+  </nav>
+  <div class="card-grid">
+    {% for s in statuses %}
+    <div class="card" id="provider-card-{{ s.provider }}">
+      <h2>{{ s.provider }}</h2>
+      <p>Status: {% if not s.configured %}Unconfigured{% elif not s.is_enabled %}Disabled{% elif s.healthy %}Healthy{% else %}Unavailable{% endif %}</p>
+      {% if s.masked_key %}<p>Key: {{ s.masked_key }}</p>{% endif %}
+      {% if s.provider == "ollama" %}
+      <label>Base URL <input type="text" name="base_url" value="{{ s.base_url or '' }}" placeholder="http://localhost:11434"></label>
+      {% else %}
+      <label>API Key <input type="password" name="api_key" placeholder="{{ s.masked_key or 'sk-...' }}"></label>
+      {% endif %}
+      {% if s.last_successful_health_check %}<p class="empty-state">Last checked: {{ s.last_successful_health_check }}</p>{% endif %}
+      {% if s.last_failure_reason %}<p class="empty-state">Last failure: {{ s.last_failure_reason }}</p>{% endif %}
+      <button type="button" onclick="testProvider('{{ s.provider }}')">Test Connection</button>
+      <button type="button" onclick="saveProvider('{{ s.provider }}')">Save</button>
+      {% if s.is_enabled %}
+      <button type="button" onclick="setEnabled('{{ s.provider }}', false)">Disable</button>
+      {% else %}
+      <button type="button" onclick="setEnabled('{{ s.provider }}', true)">Enable</button>
+      {% endif %}
+      <button type="button" onclick="deleteProvider('{{ s.provider }}')">Delete</button>
+      <p class="result" id="result-{{ s.provider }}"></p>
+    </div>
+    {% endfor %}
+  </div>
+</main>
+<script>
+function _body(name) {
+  const card = document.getElementById('provider-card-' + name);
+  const apiKey = card.querySelector('input[name="api_key"]');
+  const baseUrl = card.querySelector('input[name="base_url"]');
+  return {
+    api_key: apiKey && apiKey.value ? apiKey.value : null,
+    base_url: baseUrl && baseUrl.value ? baseUrl.value : null,
+  };
+}
+function _showResult(name, data) {
+  document.getElementById('result-' + name).textContent = JSON.stringify(data);
+}
+async function testProvider(name) {
+  const res = await fetch('/v1/providers/' + name + '/test', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(_body(name)),
+  });
+  _showResult(name, await res.json());
+}
+async function saveProvider(name) {
+  const res = await fetch('/v1/providers/' + name + '/config', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(_body(name)),
+  });
+  _showResult(name, await res.json());
+}
+async function setEnabled(name, enabled) {
+  const res = await fetch('/v1/providers/' + name + '/' + (enabled ? 'enable' : 'disable'), {method: 'POST'});
+  _showResult(name, await res.json());
+}
+async function deleteProvider(name) {
+  const res = await fetch('/v1/providers/' + name + '/config', {method: 'DELETE'});
+  _showResult(name, await res.json());
+}
+</script>
+{% endblock %}

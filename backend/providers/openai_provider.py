@@ -2,9 +2,9 @@ from collections.abc import AsyncIterator
 
 from openai import AsyncOpenAI, OpenAIError
 
-from backend.config.settings import Settings
 from backend.providers.base import BaseProvider, ProviderError
 from backend.services.cost_estimator import calculate_linear_cost
+from backend.services.credential_store import ProviderCredential
 
 
 class OpenAIProvider(BaseProvider):
@@ -13,8 +13,10 @@ class OpenAIProvider(BaseProvider):
     OpenAI SDK types (AsyncOpenAI, OpenAIError) are used only within this
     file; everything else in the app depends on BaseProvider/ProviderError."""
 
-    def __init__(self, settings: Settings, client: AsyncOpenAI | None = None) -> None:
-        self._client = client or AsyncOpenAI(api_key=settings.openai_api_key)
+    def __init__(
+        self, credential: ProviderCredential | None, client: AsyncOpenAI | None = None,
+    ) -> None:
+        self._client = client or AsyncOpenAI(api_key=credential.api_key if credential else None)
 
     @property
     def name(self) -> str:

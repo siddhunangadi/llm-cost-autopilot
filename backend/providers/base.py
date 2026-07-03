@@ -9,6 +9,14 @@ class ProviderError(Exception):
     hierarchy."""
 
 
+class ProviderUnavailableError(ProviderError):
+    """Raised when a requested provider is not currently active (e.g. it
+    was just disabled/deleted/failed to reload). A ProviderError subclass
+    so every existing (ProviderError, CircuitOpenError) failover handler
+    catches it automatically, instead of a bare KeyError escaping as an
+    unhandled 500 when a config change races an in-flight request."""
+
+
 class BaseProvider(ABC):
     """Common interface every LLM provider implementation must satisfy."""
 

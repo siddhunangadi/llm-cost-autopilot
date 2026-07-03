@@ -3,6 +3,57 @@
 All notable changes to this project are documented here. Versions
 correspond to the `vX.Y.0` git tags marking the end of each phase.
 
+## v0.9.0 — Provider Configuration (2026-07-03)
+
+Replaces `.env`-only provider API keys with dashboard-managed,
+encrypted, live-reloadable credentials for `openai`, `anthropic`, and
+`ollama`. Moves the platform from a single-operator, restart-required
+configuration model toward a runtime-managed one, without expanding the
+model registry or routing surface. Phases 1–8 delivered the project's
+planned roadmap; this release rounds it out with a practical
+operational feature and is the final release on top of that roadmap.
+
+**Added**
+- `AnthropicProvider` / `OllamaProvider` — implement `BaseProvider`
+  identically to `OpenAIProvider`'s pattern, registered in
+  `ProviderFactory` alongside `openai`/`mock`
+- `CredentialStore` — Fernet-encrypted `provider_credentials` CRUD
+  (`get`, `get_stored`, `save`, `record_health_check_failure`,
+  `set_enabled`, `delete`, `list_status`); the only layer that knows
+  encryption exists, with existing `.env` values as a fallback so a
+  deployment with only environment variables configured behaves exactly
+  as it did before this release
+- `ProviderManager.reload_provider(name)` — live, zero-downtime
+  credential swap; `ProviderFactory`/`ProviderManager` now take a
+  `ProviderCredential` value object instead of reading `Settings`
+  directly
+- Validate-before-persist save flow: a candidate credential is health-
+  checked before anything is written, so an invalid key never takes
+  down a working provider
+- `POST /v1/providers/{name}/config`, `DELETE /v1/providers/{name}/config`,
+  `POST /v1/providers/{name}/test`, `POST /v1/providers/{name}/enable`,
+  `POST /v1/providers/{name}/disable`, `GET /v1/providers/config`
+- `/dashboard/providers` page — one form per provider, masked keys,
+  Test/Save/Enable/Disable/Delete; nav link added to `/dashboard` and
+  `/dashboard/analytics`
+- `is_enabled` flag (disable without deleting); disabling or deleting a
+  provider is authoritative and is never silently overridden by an
+  environment-variable credential
+- `ProviderUnavailableError` — a provider removed/disabled/reloaded
+  concurrently with an in-flight request now fails over gracefully
+  through the existing resilience path instead of raising an unhandled
+  error
+
+**Explicitly out of scope** (deferred, not planned for a future phase):
+Gemini/Groq/OpenRouter provider classes; populating `models.yaml` so
+chat requests actually route to Anthropic/Ollama (this release makes
+providers connectable and health-checkable, not routable — routing
+remains OpenAI-only until model registry work happens separately);
+multi-organization/multi-tenant credential scoping; credential rotation
+history/audit log; any UI/API auth (matches the existing dashboard's
+current posture); capability/metadata discovery per provider;
+encryption key rotation.
+
 ## v0.8.0 — Advanced Analytics & Reporting (2026-07-03)
 
 Adds historical, trend-oriented analytics on top of the Phase 6/6b

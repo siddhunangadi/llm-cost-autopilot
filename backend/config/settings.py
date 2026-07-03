@@ -18,3 +18,5 @@ class Settings(BaseSettings):
 
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
+    ollama_base_url: str | None = None
+    provider_credential_encryption_key: str | None = None

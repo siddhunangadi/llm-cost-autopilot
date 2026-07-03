@@ -12,7 +12,7 @@ from backend.config.settings import Settings
 from backend.database.base import create_engine_from_settings, create_session_factory, init_db
 from backend.database.models import RequestRow, ResponseRow, RoutingEventRow
 from backend.events.bus import EventBus
-from backend.providers.base import ProviderError
+from backend.providers.base import ProviderError, ProviderUnavailableError
 from backend.providers.circuit_breaker import CircuitBreaker
 from backend.providers.executor import ProviderExecutor
 from backend.providers.factory import ProviderFactory
@@ -25,6 +25,7 @@ from backend.routing.explanation import ExplanationGenerator
 from backend.routing.policy import RoutingPolicy
 from backend.routing.strategies import BalancedStrategy
 from backend.services.cost_estimator import DefaultCostEstimator
+from backend.services.credential_store import CredentialStore
 from backend.services.model_registry import ModelRegistry
 from backend.verification.engine import JudgeEngine
 from backend.verification.judge import LLMJudge
@@ -72,7 +73,8 @@ def _make_chat_service(tmp_path, verification_service=None):
 
     factory = ProviderFactory()
     factory.register("mock", MockProvider)
-    provider_manager = ProviderManager(factory, settings)
+    credential_store = CredentialStore(session_factory=session_factory, settings=settings)
+    provider_manager = ProviderManager(factory, credential_store)
     provider_executor = ProviderExecutor(
         provider_manager=provider_manager,
         retry_policy=ExponentialBackoffRetryPolicy(max_attempts=3, sleep=_no_op_sleep),
@@ -193,6 +195,25 @@ async def test_chat_succeeds_even_if_verification_service_would_fail(tmp_path):
     # here since add_task() only registers the call, it doesn't invoke it.
 
 
+async def test_chat_fails_over_when_provider_is_disabled_between_route_and_generate(tmp_path):
+    chat_service, session_factory = _make_chat_service(tmp_path)
+    provider_manager = chat_service._provider_manager
+    provider_manager._providers.pop("mock")  # simulate a concurrent disable/delete
+
+    with pytest.raises(NoEligibleModelError):
+        await chat_service.chat(
+            "List three fruits.", strategy="balanced", background_tasks=BackgroundTasks()
+        )
+
+    with session_factory() as session:
+        response_row = session.query(ResponseRow).one()
+
+    # The race must surface as the same handled no-eligible-model path as
+    # any other provider failure -- never an unhandled KeyError/500.
+    assert response_row.response_text is None
+    assert response_row.error_type == "no_eligible_model"
+
+
 TWO_PROVIDER_YAML = textwrap.dedent("""
     models:
       - id: primary-model
@@ -239,7 +260,7 @@ class _TwoProviderManager:
     double is required to exercise real cross-provider failover."""
 
     def __init__(self, primary: MockProvider, backup: MockProvider) -> None:
-        self._providers = {"primary": primary, "backup": backup}
+        self._providers = {"primary": primary, "backup": backup, "mock": MockProvider()}
 
     def get_provider(self, name: str):
         return self._providers[name]
@@ -339,6 +360,35 @@ async def test_chat_fails_over_to_backup_provider_after_primary_exhausts_retries
     assert routing_events[1].selected_model == "backup-model"
     assert response_row.response_text == "backup-response"
     assert response_row.error is None
+
+
+async def test_chat_falls_back_to_mock_for_cost_accounting_when_provider_removed_after_generate(
+    tmp_path, mocker
+):
+    chat_service, session_factory, primary, _backup = _make_failover_chat_service(tmp_path)
+    provider_manager = chat_service._provider_manager
+    real_get_provider = provider_manager.get_provider
+    calls = []
+
+    def flaky_get_provider(name):
+        calls.append(name)
+        # Let the in-flight generate() call (and any other provider)
+        # resolve normally; only the specific post-generate lookup for the
+        # provider that was just used to generate a response is made to
+        # race (as if it were disabled/deleted concurrently).
+        if name == "primary" and calls.count("primary") == 2:
+            raise ProviderUnavailableError("Provider 'primary' is not available")
+        return real_get_provider(name)
+
+    mocker.patch.object(provider_manager, "get_provider", side_effect=flaky_get_provider)
+
+    result = await chat_service.chat("Hello.", strategy="balanced", background_tasks=BackgroundTasks())
+
+    assert result.response == "primary-response"
+    with session_factory() as session:
+        response_row = session.query(ResponseRow).filter_by(request_id=result.request_id).one()
+    assert response_row.error is None
+    assert response_row.actual_input_tokens is not None
 
 
 async def test_chat_persists_error_type_when_both_primary_and_failover_fail(tmp_path, mocker):
