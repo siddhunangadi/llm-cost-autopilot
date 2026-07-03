@@ -96,10 +96,19 @@ class CredentialStore:
         with self._session_factory() as session:
             row = (
                 session.query(ProviderCredentialRow)
-                .filter_by(provider_name=provider_name, is_enabled=True)
+                .filter_by(provider_name=provider_name)
                 .first()
             )
-        if row is not None:
+        # is_enabled=False is an explicit user action (disable, or the
+        # tombstone left by delete -- see delete()/set_enabled()) and must
+        # never be silently overridden by an environment-variable
+        # credential, regardless of whether stored key material exists.
+        if row is not None and not row.is_enabled:
+            return None
+        has_credential_material = row is not None and (
+            row.encrypted_api_key is not None or row.base_url is not None
+        )
+        if has_credential_material:
             return ProviderCredential(
                 provider_name=provider_name,
                 api_key=self._decrypt(row.encrypted_api_key),
@@ -139,9 +148,10 @@ class CredentialStore:
             if row is None:
                 # No credential has ever been saved for this provider -- track
                 # the failure anyway so a first-attempt failure isn't silently
-                # dropped. Leave it unconfigured/disabled since no credential
-                # material was actually persisted.
-                row = ProviderCredentialRow(provider_name=provider_name, is_enabled=False)
+                # dropped. is_enabled stays True (the default): this is a
+                # failure note, not a user disable action, so it must not
+                # suppress env-var fallback for an otherwise-working provider.
+                row = ProviderCredentialRow(provider_name=provider_name)
                 session.add(row)
             row.last_failure_reason = failure_reason
             session.commit()
@@ -153,15 +163,36 @@ class CredentialStore:
                 .filter_by(provider_name=provider_name)
                 .first()
             )
-            if row is not None:
-                row.is_enabled = enabled
-                session.commit()
+            if row is None:
+                if not enabled:
+                    # No stored credential exists (provider is env-only, or
+                    # was never configured) but the user explicitly asked to
+                    # disable it -- persist a tombstone so get() stops
+                    # resolving an environment-variable credential for it.
+                    session.add(ProviderCredentialRow(provider_name=provider_name, is_enabled=False))
+                    session.commit()
+                return
+            row.is_enabled = enabled
+            session.commit()
 
     def delete(self, provider_name: str) -> None:
         with self._session_factory() as session:
-            session.query(ProviderCredentialRow).filter_by(
-                provider_name=provider_name
-            ).delete()
+            row = (
+                session.query(ProviderCredentialRow)
+                .filter_by(provider_name=provider_name)
+                .first()
+            )
+            if row is None:
+                row = ProviderCredentialRow(provider_name=provider_name)
+                session.add(row)
+            # Clear credential material but keep (or create) the row,
+            # disabled, as a tombstone -- otherwise get() would see no row
+            # at all and silently fall back to an environment-variable
+            # credential, undoing the delete.
+            row.encrypted_api_key = None
+            row.base_url = None
+            row.is_enabled = False
+            row.last_failure_reason = None
             session.commit()
 
     def list_status(self, is_healthy_fn) -> list[ProviderConfigStatus]:
@@ -195,7 +226,7 @@ class CredentialStore:
                     configured=env_credential is not None,
                     masked_key=mask_key(env_credential.api_key) if env_credential else None,
                     base_url=env_credential.base_url if env_credential else None,
-                    is_enabled=True,
+                    is_enabled=row.is_enabled if row is not None else True,
                     healthy=is_healthy_fn(name),
                     last_successful_health_check=None,
                     last_failure_reason=row.last_failure_reason if row is not None else None,

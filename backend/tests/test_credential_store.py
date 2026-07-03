@@ -63,11 +63,29 @@ def test_record_health_check_failure_does_not_touch_stored_key(tmp_path):
     assert store.get("openai").api_key == "sk-good"
 
 
-def test_set_enabled_false_falls_back_to_env(tmp_path):
+def test_set_enabled_false_is_not_overridden_by_env_var(tmp_path):
     store, _ = _make_store(tmp_path, openai_api_key="sk-env")
     store.save("openai", api_key="sk-db", base_url=None)
 
     store.set_enabled("openai", False)
+
+    assert store.get("openai") is None
+
+
+def test_set_enabled_false_on_env_only_provider_persists_a_tombstone(tmp_path):
+    store, _ = _make_store(tmp_path, openai_api_key="sk-env")
+
+    store.set_enabled("openai", False)
+
+    assert store.get("openai") is None
+
+
+def test_set_enabled_true_after_disable_restores_env_fallback(tmp_path):
+    store, _ = _make_store(tmp_path, openai_api_key="sk-env")
+    store.set_enabled("openai", False)
+    assert store.get("openai") is None
+
+    store.set_enabled("openai", True)
 
     assert store.get("openai").api_key == "sk-env"
 
@@ -79,6 +97,23 @@ def test_delete_removes_the_row(tmp_path):
     store.delete("openai")
 
     assert store.get("openai") is None
+
+
+def test_delete_is_not_overridden_by_env_var(tmp_path):
+    store, _ = _make_store(tmp_path, openai_api_key="sk-env")
+    store.save("openai", api_key="sk-db", base_url=None)
+
+    store.delete("openai")
+
+    assert store.get("openai") is None
+
+
+def test_record_health_check_failure_on_env_only_provider_still_falls_back_to_env(tmp_path):
+    store, _ = _make_store(tmp_path, openai_api_key="sk-env")
+
+    store.record_health_check_failure("openai", "health check failed")
+
+    assert store.get("openai").api_key == "sk-env"
 
 
 def test_ollama_credential_has_no_api_key_only_base_url(tmp_path):

@@ -112,6 +112,32 @@ def test_disable_then_enable_provider_toggles_availability(tmp_path, monkeypatch
         assert listed["openai"]["is_enabled"] is True
 
 
+def test_disable_is_not_reactivated_by_env_var(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-env-fallback")
+    for client in _client(tmp_path, monkeypatch):
+        client.post("/v1/providers/openai/config", json={"api_key": "sk-test-123456"})
+
+        disabled = client.post("/v1/providers/openai/disable")
+
+        assert disabled.status_code == 200
+        assert disabled.json()["activated"] is False
+        listed = {s["provider"]: s for s in client.get("/v1/providers/config").json()}
+        assert listed["openai"]["is_enabled"] is False
+
+
+def test_delete_is_not_reactivated_by_env_var(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-env-fallback")
+    for client in _client(tmp_path, monkeypatch):
+        client.post("/v1/providers/openai/config", json={"api_key": "sk-test-123456"})
+
+        deleted = client.delete("/v1/providers/openai/config")
+
+        assert deleted.status_code == 200
+        assert deleted.json()["activated"] is False
+        listed = {s["provider"]: s for s in client.get("/v1/providers/config").json()}
+        assert listed["openai"]["configured"] is False
+
+
 def test_providers_page_renders(tmp_path, monkeypatch):
     for client in _client(tmp_path, monkeypatch):
         response = client.get("/dashboard/providers")
