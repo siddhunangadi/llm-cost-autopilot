@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from backend.api.main import create_app
+from backend.providers.gemini_provider import GeminiProvider
 from backend.providers.mock_provider import MockProvider
 
 
@@ -159,6 +160,22 @@ def test_delete_is_not_reactivated_by_env_var(tmp_path, monkeypatch):
         assert deleted.json()["activated"] is False
         listed = {s["provider"]: s for s in client.get("/v1/providers/config").json()}
         assert listed["openai"]["configured"] is False
+
+
+def test_new_provider_is_known_once_registered_in_factory(tmp_path, monkeypatch):
+    for client in _client(tmp_path, monkeypatch):
+        # "gemini" is not registered by _build_provider_factory in this
+        # branch snapshot's fixture yet -- registering it directly on the
+        # already-built factory (as the test/enable/disable/delete routes
+        # consult it live via provider_factory.registered_names()) must be
+        # enough to make the router treat it as a known provider, with no
+        # provider-specific logic needed in the router itself.
+        client.app.state.provider_factory.register("gemini", GeminiProvider)
+
+        response = client.post("/v1/providers/gemini/test", json={"api_key": "bogus"})
+
+        assert response.status_code == 200
+        assert response.json()["reason"] == "health check failed"
 
 
 def test_providers_page_renders(tmp_path, monkeypatch):
