@@ -8,10 +8,17 @@ from pydantic import ValidationError
 from backend.config.settings import Settings
 from backend.database.base import create_engine_from_settings, create_session_factory, init_db
 from backend.events.bus import EventBus
+from backend.providers.anthropic_provider import AnthropicProvider
 from backend.providers.factory import ProviderFactory
+from backend.providers.gemini_provider import GeminiProvider
+from backend.providers.groq_provider import GroqProvider
 from backend.providers.manager import ProviderManager
+from backend.providers.mistral_provider import MistralProvider
 from backend.providers.mock_provider import MockProvider
+from backend.providers.nvidia_nim_provider import NvidiaNimProvider
+from backend.providers.ollama_provider import OllamaProvider
 from backend.providers.openai_provider import OpenAIProvider
+from backend.providers.openrouter_provider import OpenRouterProvider
 from backend.services.cost_estimator import DefaultCostEstimator
 from backend.services.credential_store import CredentialStore
 from backend.services.model_registry import ModelRegistry
@@ -223,3 +230,44 @@ def test_failed_reload_does_not_corrupt_existing_cache(tmp_path):
 
     assert len(registry.get_models()) == 1
     assert registry.get_model("gpt-4o-mini") is not None
+
+
+def test_new_provider_models_are_registered():
+    """Test that curated models for new providers are registered in the real models.yaml"""
+    settings = Settings(_env_file=None, openai_api_key="sk-test")
+    engine = create_engine_from_settings(settings)
+    init_db(engine)
+    session_factory = create_session_factory(engine)
+
+    factory = ProviderFactory()
+    factory.register("mock", MockProvider)
+    factory.register("openai", OpenAIProvider)
+    factory.register("gemini", GeminiProvider)
+    factory.register("groq", GroqProvider)
+    factory.register("mistral", MistralProvider)
+    factory.register("nvidia_nim", NvidiaNimProvider)
+    factory.register("openrouter", OpenRouterProvider)
+    factory.register("anthropic", AnthropicProvider)
+    factory.register("ollama", OllamaProvider)
+
+    credential_store = CredentialStore(
+        session_factory=session_factory,
+        settings=settings,
+        provider_names=tuple(factory.registered_names()),
+    )
+    provider_manager = ProviderManager(factory, credential_store)
+
+    registry = ModelRegistry(
+        provider_manager=provider_manager,
+        event_bus=EventBus(),
+        cost_estimator=DefaultCostEstimator(),
+        session_factory=session_factory,
+        yaml_path=settings.models_yaml_path,
+    )
+    registry.reload()
+
+    ids = {spec.id for spec in registry.get_models()}
+    assert {
+        "gemini-2.5-pro", "gemini-2.5-flash", "llama-3.3-70b-versatile",
+        "mistral-large-latest", "meta/llama-3.3-70b-instruct", "openai/gpt-4.1-mini",
+    } <= ids

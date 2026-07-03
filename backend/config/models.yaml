@@ -50,3 +50,105 @@ models:
     metadata:
       benchmark_score: 0.75
       average_latency_ms: 1200
+  - id: gemini-2.5-pro
+    provider: gemini
+    model: gemini-2.5-pro
+    pricing:
+      input_cost: 1.25
+      output_cost: 10.00
+    limits:
+      context_window: 1048576
+      max_output_tokens: 65536
+    capabilities:
+      supports_streaming: true
+      supports_tools: true
+      supports_json: true
+      supports_vision: true
+    metadata:
+      benchmark_score: 0.90
+      average_latency_ms: 1100
+  - id: gemini-2.5-flash
+    provider: gemini
+    model: gemini-2.5-flash
+    pricing:
+      input_cost: 0.30
+      output_cost: 2.50
+    limits:
+      context_window: 1048576
+      max_output_tokens: 65536
+    capabilities:
+      supports_streaming: true
+      supports_tools: true
+      supports_json: true
+      supports_vision: true
+    metadata:
+      benchmark_score: 0.85
+      average_latency_ms: 500
+  - id: llama-3.3-70b-versatile
+    provider: groq
+    model: llama-3.3-70b-versatile
+    pricing:
+      input_cost: 0.59
+      output_cost: 0.79
+    limits:
+      context_window: 128000
+      max_output_tokens: 32768
+    capabilities:
+      supports_streaming: true
+      supports_tools: true
+      supports_json: true
+      supports_vision: false
+    metadata:
+      benchmark_score: 0.86
+      average_latency_ms: 250
+  - id: mistral-large-latest
+    provider: mistral
+    model: mistral-large-latest
+    pricing:
+      input_cost: 2.00
+      output_cost: 6.00
+    limits:
+      context_window: 128000
+      max_output_tokens: 32768
+    capabilities:
+      supports_streaming: true
+      supports_tools: true
+      supports_json: true
+      supports_vision: false
+    metadata:
+      benchmark_score: 0.88
+      average_latency_ms: 700
+  - id: meta/llama-3.3-70b-instruct
+    provider: nvidia_nim
+    model: meta/llama-3.3-70b-instruct
+    pricing:
+      input_cost: 0.0  # Free tier via NVIDIA NIM developer API
+      output_cost: 0.0
+    limits:
+      context_window: 128000
+      max_output_tokens: 4096
+    capabilities:
+      supports_streaming: true
+      supports_tools: true
+      supports_json: true
+      supports_vision: false
+    metadata:
+      benchmark_score: 0.86
+      average_latency_ms: 600
+  - id: openai/gpt-4.1-mini
+    provider: openrouter
+    model: openai/gpt-4.1-mini
+    pricing:
+      input_cost: 0.40
+      output_cost: 1.60
+    limits:
+      context_window: 1047576
+      max_output_tokens: 32768
+    capabilities:
+      supports_streaming: true
+      supports_tools: true
+      supports_json: true
+      supports_vision: true
+    metadata:
+      benchmark_score: 0.87
+      average_latency_ms: 550
