@@ -73,7 +73,10 @@ def _make_chat_service(tmp_path, verification_service=None):
 
     factory = ProviderFactory()
     factory.register("mock", MockProvider)
-    credential_store = CredentialStore(session_factory=session_factory, settings=settings)
+    credential_store = CredentialStore(
+        session_factory=session_factory, settings=settings,
+        provider_names=("openai", "anthropic", "ollama"),
+    )
     provider_manager = ProviderManager(factory, credential_store)
     provider_executor = ProviderExecutor(
         provider_manager=provider_manager,

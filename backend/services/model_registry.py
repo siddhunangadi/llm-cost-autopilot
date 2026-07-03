@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from backend.database.models import ModelRow, ProviderRow
 from backend.events.bus import EventBus
 from backend.events.types import EventType
-from backend.providers.manager import KNOWN_PROVIDER_NAMES, ProviderManager
+from backend.providers.manager import ProviderManager
 from backend.services.cost_estimator import BaseCostEstimator
 
 
@@ -185,7 +185,7 @@ class ModelRegistry(BaseRegistry):
 
     async def refresh_provider_status(self) -> None:
         with self._session_factory() as session:
-            for provider_name in KNOWN_PROVIDER_NAMES:
+            for provider_name in self._provider_manager.registered_names():
                 row = session.query(ProviderRow).filter_by(name=provider_name).one_or_none()
                 if row is None:
                     row = ProviderRow(name=provider_name)

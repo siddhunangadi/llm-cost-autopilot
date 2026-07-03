@@ -8,7 +8,6 @@ from backend.api.dependencies import (
     AppVersionDep, CredentialStoreDep, ProviderFactoryDep, ProviderManagerDep,
 )
 from backend.api.paths import TEMPLATES_DIR
-from backend.providers.manager import KNOWN_PROVIDER_NAMES
 from backend.services.credential_store import ProviderConfigStatus, ProviderCredential
 
 router = APIRouter(prefix="/v1/providers")
@@ -31,8 +30,8 @@ class ProviderConfigResult(BaseModel):
     reason: str | None = None
 
 
-def _require_known(name: str) -> None:
-    if name not in KNOWN_PROVIDER_NAMES:
+def _require_known(name: str, known_names: tuple[str, ...]) -> None:
+    if name not in known_names:
         raise HTTPException(status_code=404, detail=f"Unknown provider '{name}'")
 
 
@@ -58,7 +57,7 @@ async def save_provider_config(
     credential_store: CredentialStoreDep, provider_manager: ProviderManagerDep,
     provider_factory: ProviderFactoryDep,
 ) -> ProviderConfigResult:
-    _require_known(name)
+    _require_known(name, provider_manager.registered_names())
     candidate = _resolve_candidate(name, body, credential_store)
     provider = provider_factory.create(name, candidate)
     healthy = await provider.health_check()
@@ -74,7 +73,7 @@ async def save_provider_config(
 async def delete_provider_config(
     name: str, credential_store: CredentialStoreDep, provider_manager: ProviderManagerDep,
 ) -> ProviderConfigResult:
-    _require_known(name)
+    _require_known(name, provider_manager.registered_names())
     credential_store.delete(name)
     activated = provider_manager.reload_provider(name)
     return ProviderConfigResult(saved=True, activated=activated)
@@ -84,7 +83,7 @@ async def delete_provider_config(
 async def enable_provider(
     name: str, credential_store: CredentialStoreDep, provider_manager: ProviderManagerDep,
 ) -> ProviderConfigResult:
-    _require_known(name)
+    _require_known(name, provider_manager.registered_names())
     credential_store.set_enabled(name, True)
     activated = provider_manager.reload_provider(name)
     return ProviderConfigResult(saved=True, activated=activated)
@@ -94,7 +93,7 @@ async def enable_provider(
 async def disable_provider(
     name: str, credential_store: CredentialStoreDep, provider_manager: ProviderManagerDep,
 ) -> ProviderConfigResult:
-    _require_known(name)
+    _require_known(name, provider_manager.registered_names())
     credential_store.set_enabled(name, False)
     activated = provider_manager.reload_provider(name)
     return ProviderConfigResult(saved=True, activated=activated)
@@ -105,7 +104,7 @@ async def test_provider_config(
     name: str, body: ProviderConfigRequest,
     credential_store: CredentialStoreDep, provider_factory: ProviderFactoryDep,
 ) -> ProviderConfigResult:
-    _require_known(name)
+    _require_known(name, provider_factory.registered_names())
     candidate = _resolve_candidate(name, body, credential_store)
     provider = provider_factory.create(name, candidate)
     healthy = await provider.health_check()

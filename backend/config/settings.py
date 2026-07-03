@@ -19,4 +19,9 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
     ollama_base_url: str | None = None
+    gemini_api_key: str | None = None
+    nvidia_nim_api_key: str | None = None
+    openrouter_api_key: str | None = None
+    groq_api_key: str | None = None
+    mistral_api_key: str | None = None
     provider_credential_encryption_key: str | None = None

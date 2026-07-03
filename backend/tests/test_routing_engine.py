@@ -81,7 +81,10 @@ def _make_engine(tmp_path, openai_key="sk-test", strategies=None):
     factory = ProviderFactory()
     factory.register("mock", MockProvider)
     factory.register("openai", OpenAIProvider)
-    credential_store = CredentialStore(session_factory=session_factory, settings=settings)
+    credential_store = CredentialStore(
+        session_factory=session_factory, settings=settings,
+        provider_names=("openai", "anthropic", "ollama"),
+    )
     provider_manager = ProviderManager(factory, credential_store)
 
     model_registry = ModelRegistry(

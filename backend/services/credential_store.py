@@ -8,9 +8,6 @@ from sqlalchemy.orm import sessionmaker
 from backend.config.settings import Settings
 from backend.database.models import ProviderCredentialRow
 
-KNOWN_PROVIDER_NAMES = ("openai", "anthropic", "ollama")
-
-
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -51,6 +48,21 @@ _ENV_FALLBACK = {
     "ollama": lambda s: ProviderCredential("ollama", None, s.ollama_base_url)
     if s.ollama_base_url
     else None,
+    "gemini": lambda s: ProviderCredential("gemini", s.gemini_api_key, None)
+    if s.gemini_api_key
+    else None,
+    "nvidia_nim": lambda s: ProviderCredential("nvidia_nim", s.nvidia_nim_api_key, None)
+    if s.nvidia_nim_api_key
+    else None,
+    "openrouter": lambda s: ProviderCredential("openrouter", s.openrouter_api_key, None)
+    if s.openrouter_api_key
+    else None,
+    "groq": lambda s: ProviderCredential("groq", s.groq_api_key, None)
+    if s.groq_api_key
+    else None,
+    "mistral": lambda s: ProviderCredential("mistral", s.mistral_api_key, None)
+    if s.mistral_api_key
+    else None,
 }
 
 
@@ -59,9 +71,12 @@ class CredentialStore:
     layer in the system that knows encryption exists -- callers always
     receive/pass plain ProviderCredential value objects."""
 
-    def __init__(self, session_factory: sessionmaker, settings: Settings) -> None:
+    def __init__(
+        self, session_factory: sessionmaker, settings: Settings, provider_names: tuple[str, ...],
+    ) -> None:
         self._session_factory = session_factory
         self._settings = settings
+        self._provider_names = provider_names
         self._fernet = (
             Fernet(settings.provider_credential_encryption_key.encode())
             if settings.provider_credential_encryption_key
@@ -224,7 +239,7 @@ class CredentialStore:
         with self._session_factory() as session:
             rows = {r.provider_name: r for r in session.query(ProviderCredentialRow).all()}
         result = []
-        for name in KNOWN_PROVIDER_NAMES:
+        for name in self._provider_names:
             row = rows.get(name)
             # A row can exist purely to record a health-check failure from a
             # save attempt that never actually persisted credential material

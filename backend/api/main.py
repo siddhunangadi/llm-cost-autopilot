@@ -33,7 +33,7 @@ from backend.providers.anthropic_provider import AnthropicProvider
 from backend.providers.circuit_breaker import CircuitBreaker
 from backend.providers.executor import ProviderExecutor
 from backend.providers.factory import ProviderFactory
-from backend.providers.manager import KNOWN_PROVIDER_NAMES, ProviderManager
+from backend.providers.manager import ProviderManager
 from backend.providers.mock_provider import MockProvider
 from backend.providers.ollama_provider import OllamaProvider
 from backend.providers.openai_provider import OpenAIProvider
@@ -79,7 +79,7 @@ class _UnavailableJudge(BaseJudge):
 
 def _build_provider_factory() -> ProviderFactory:
     factory = ProviderFactory()
-    factory.register("mock", MockProvider)
+    factory.register("mock", MockProvider, user_configurable=False)
     factory.register("openai", OpenAIProvider)
     factory.register("anthropic", AnthropicProvider)
     factory.register("ollama", OllamaProvider)
@@ -99,8 +99,12 @@ async def lifespan(app: FastAPI):
     init_db(engine)
     session_factory = create_session_factory(engine)
 
-    credential_store = CredentialStore(session_factory=session_factory, settings=settings)
     provider_factory = _build_provider_factory()
+    credential_store = CredentialStore(
+        session_factory=session_factory,
+        settings=settings,
+        provider_names=provider_factory.registered_names(),
+    )
     provider_manager = ProviderManager(provider_factory, credential_store)
 
     model_registry = ModelRegistry(
@@ -160,7 +164,7 @@ async def lifespan(app: FastAPI):
     provider_executor = ProviderExecutor(
         provider_manager=provider_manager,
         retry_policy=ExponentialBackoffRetryPolicy(),
-        circuit_breakers={name: CircuitBreaker() for name in KNOWN_PROVIDER_NAMES},
+        circuit_breakers={name: CircuitBreaker() for name in provider_manager.registered_names()},
         event_bus=event_bus,
     )
 

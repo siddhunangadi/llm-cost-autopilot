@@ -7,7 +7,7 @@ from backend.database.models import ProviderCredentialRow
 from backend.services.credential_store import CredentialStore, mask_key
 
 
-def _make_store(tmp_path, **settings_kwargs):
+def _make_store(tmp_path, provider_names=("openai", "anthropic", "ollama"), **settings_kwargs):
     key = Fernet.generate_key().decode()
     settings = Settings(
         _env_file=None, database_url=f"sqlite:///{tmp_path}/test.db",
@@ -16,7 +16,10 @@ def _make_store(tmp_path, **settings_kwargs):
     engine = create_engine_from_settings(settings)
     init_db(engine)
     session_factory = create_session_factory(engine)
-    return CredentialStore(session_factory=session_factory, settings=settings), settings
+    store = CredentialStore(
+        session_factory=session_factory, settings=settings, provider_names=provider_names,
+    )
+    return store, settings
 
 
 def test_save_then_get_round_trips_the_api_key(tmp_path):
@@ -177,7 +180,10 @@ def test_missing_encryption_key_with_existing_row_raises(tmp_path):
         _env_file=None, database_url=settings.database_url, provider_credential_encryption_key=None,
     )
     with pytest.raises(RuntimeError):
-        CredentialStore(session_factory=session_factory, settings=settings_no_key)
+        CredentialStore(
+            session_factory=session_factory, settings=settings_no_key,
+            provider_names=("openai", "anthropic", "ollama"),
+        )
 
 
 def test_missing_encryption_key_with_no_rows_does_not_raise(tmp_path):
@@ -189,7 +195,10 @@ def test_missing_encryption_key_with_no_rows_does_not_raise(tmp_path):
     init_db(engine)
     session_factory = create_session_factory(engine)
 
-    CredentialStore(session_factory=session_factory, settings=settings)
+    CredentialStore(
+        session_factory=session_factory, settings=settings,
+        provider_names=("openai", "anthropic", "ollama"),
+    )
 
 
 def test_list_status_reflects_configured_and_unconfigured_providers(tmp_path):
@@ -204,3 +213,20 @@ def test_list_status_reflects_configured_and_unconfigured_providers(tmp_path):
     assert by_provider["openai"].healthy is True
     assert by_provider["anthropic"].configured is False
     assert by_provider["anthropic"].masked_key is None
+
+
+def test_list_status_covers_injected_provider_names(tmp_path):
+    store, _ = _make_store(tmp_path, provider_names=("openai", "gemini", "groq"))
+
+    names = [status.provider for status in store.list_status(lambda name: False)]
+
+    assert names == ["openai", "gemini", "groq"]
+
+
+def test_new_provider_env_fallback_resolves_from_settings(tmp_path):
+    store, _ = _make_store(tmp_path, gemini_api_key="gm-test")
+
+    credential = store.get("gemini")
+
+    assert credential.api_key == "gm-test"
+    assert credential.base_url is None

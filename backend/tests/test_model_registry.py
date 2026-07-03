@@ -120,7 +120,10 @@ def _make_registry(tmp_path, openai_key, yaml_text=SAMPLE_YAML):
     factory = ProviderFactory()
     factory.register("mock", MockProvider)
     factory.register("openai", OpenAIProvider)
-    credential_store = CredentialStore(session_factory=session_factory, settings=settings)
+    credential_store = CredentialStore(
+        session_factory=session_factory, settings=settings,
+        provider_names=("openai", "anthropic", "ollama"),
+    )
     provider_manager = ProviderManager(factory, credential_store)
 
     return ModelRegistry(

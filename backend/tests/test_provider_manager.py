@@ -37,7 +37,10 @@ def _make_credential_store(tmp_path, **settings_kwargs):
     engine = create_engine_from_settings(settings)
     init_db(engine)
     session_factory = create_session_factory(engine)
-    return CredentialStore(session_factory=session_factory, settings=settings)
+    return CredentialStore(
+        session_factory=session_factory, settings=settings,
+        provider_names=("openai", "anthropic", "ollama"),
+    )
 
 
 class _BrokenProvider(BaseProvider):
