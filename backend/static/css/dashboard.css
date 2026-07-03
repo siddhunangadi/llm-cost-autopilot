@@ -83,6 +83,193 @@ header.dashboard-header h1 {
   font-variant-numeric: tabular-nums;
 }
 
+/* Page nav (tab bar) -- lives inside main.dashboard's grid, so it must
+   span every column like the other full-width sections. */
+nav.dashboard-nav {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+nav.dashboard-nav a {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  transition: color 150ms ease-out, background 150ms ease-out;
+}
+
+nav.dashboard-nav a:hover {
+  color: var(--text);
+  background: var(--panel-hover);
+}
+
+nav.dashboard-nav a.active {
+  color: var(--text);
+  background: var(--color-primary-dim);
+}
+
+@media (max-width: 768px) {
+  nav.dashboard-nav { gap: var(--space-1); overflow-x: auto; }
+}
+
+/* Buttons */
+button {
+  font-family: var(--font-sans);
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--panel-hover);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  min-height: 40px;
+  transition: background 150ms ease-out, border-color 150ms ease-out, transform 100ms ease-out;
+}
+
+button:hover {
+  background: var(--border);
+  border-color: var(--text-faint);
+}
+
+button:active {
+  transform: scale(0.97);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+button.btn-primary {
+  color: #fff;
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+button.btn-primary:hover {
+  background: var(--color-primary-dim);
+  border-color: var(--color-primary-dim);
+}
+
+button.btn-danger {
+  color: var(--color-err);
+  background: transparent;
+  border-color: var(--color-err);
+}
+
+button.btn-danger:hover {
+  color: #fff;
+  background: var(--color-err);
+}
+
+/* Forms */
+label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: var(--space-3);
+}
+
+input[type="text"],
+input[type="password"] {
+  display: block;
+  width: 100%;
+  margin-top: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  min-height: 40px;
+  transition: border-color 150ms ease-out;
+}
+
+input[type="text"]::placeholder,
+input[type="password"]::placeholder {
+  color: var(--text-faint);
+}
+
+input[type="text"]:hover,
+input[type="password"]:hover {
+  border-color: var(--text-faint);
+}
+
+/* Inline action result message */
+.result {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  min-height: 1.2em;
+  margin: var(--space-3) 0 0;
+}
+
+.result[data-state="success"] { color: var(--color-ok); }
+.result[data-state="error"] { color: var(--color-err); }
+
+/* Provider status badge (reuses the circuit-state dot pattern) */
+.provider-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 0.82rem;
+  font-weight: 500;
+  margin: 0 0 var(--space-3);
+}
+
+.provider-status::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.provider-status[data-status="healthy"] { color: var(--color-ok); }
+.provider-status[data-status="healthy"]::before { background: var(--color-ok); box-shadow: 0 0 6px rgba(34, 197, 94, 0.6); }
+
+.provider-status[data-status="unavailable"] { color: var(--color-err); }
+.provider-status[data-status="unavailable"]::before { background: var(--color-err); box-shadow: 0 0 6px rgba(239, 68, 68, 0.6); }
+
+.provider-status[data-status="disabled"] { color: var(--color-warn); }
+.provider-status[data-status="disabled"]::before { background: var(--color-warn); }
+
+.provider-status[data-status="unconfigured"] { color: var(--text-faint); }
+.provider-status[data-status="unconfigured"]::before { background: var(--text-faint); }
+
+/* Provider config cards */
+.provider-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.provider-card h2 {
+  margin: 0 0 var(--space-2);
+  font-size: 1rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.provider-card .masked-key {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin: 0 0 var(--space-3);
+}
+
+.provider-card .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
 main.dashboard {
   padding: var(--space-5);
   max-width: 1440px;

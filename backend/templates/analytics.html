@@ -3,7 +3,9 @@
 {% block content %}
 <main class="dashboard">
   <nav class="dashboard-nav">
-    <a href="/dashboard">Operations Dashboard</a> | <a href="/dashboard/analytics">Analytics</a> | <a href="/dashboard/providers">Providers</a>
+    <a href="/dashboard">Operations Dashboard</a>
+    <a href="/dashboard/analytics" class="active">Analytics</a>
+    <a href="/dashboard/providers">Providers</a>
   </nav>
   <p class="last-updated">Report window: last {{ report.window_days }} days. Generated at {{ report.generated_at }}. <a href="/dashboard/analytics?days={{ report.window_days }}">Refresh</a></p>
 

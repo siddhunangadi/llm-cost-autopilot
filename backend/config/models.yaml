@@ -33,3 +33,20 @@ models:
     metadata:
       benchmark_score: 0.93
       average_latency_ms: 900
+  - id: local-llama3
+    provider: ollama
+    model: llama3
+    pricing:
+      input_cost: 0.0  # Free!
+      output_cost: 0.0 # Free!
+    limits:
+      context_window: 8192
+      max_output_tokens: 4096
+    capabilities:
+      supports_streaming: true
+      supports_tools: false
+      supports_json: true
+      supports_vision: false
+    metadata:
+      benchmark_score: 0.75
+      average_latency_ms: 1200

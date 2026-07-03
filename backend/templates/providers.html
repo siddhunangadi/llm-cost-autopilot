@@ -3,14 +3,18 @@
 {% block content %}
 <main class="dashboard">
   <nav class="dashboard-nav">
-    <a href="/dashboard">Operations Dashboard</a> | <a href="/dashboard/analytics">Analytics</a> | <a href="/dashboard/providers">Providers</a>
+    <a href="/dashboard">Operations Dashboard</a>
+    <a href="/dashboard/analytics">Analytics</a>
+    <a href="/dashboard/providers" class="active">Providers</a>
   </nav>
   <div class="card-grid">
     {% for s in statuses %}
-    <div class="card" id="provider-card-{{ s.provider }}">
+    {% set status_key = "unconfigured" if not s.configured else ("disabled" if not s.is_enabled else ("healthy" if s.healthy else "unavailable")) %}
+    {% set status_label = "Unconfigured" if not s.configured else ("Disabled" if not s.is_enabled else ("Healthy" if s.healthy else "Unavailable")) %}
+    <div class="card provider-card" id="provider-card-{{ s.provider }}">
       <h2>{{ s.provider }}</h2>
-      <p>Status: {% if not s.configured %}Unconfigured{% elif not s.is_enabled %}Disabled{% elif s.healthy %}Healthy{% else %}Unavailable{% endif %}</p>
-      {% if s.masked_key %}<p>Key: {{ s.masked_key }}</p>{% endif %}
+      <p class="provider-status" data-status="{{ status_key }}">{{ status_label }}</p>
+      {% if s.masked_key %}<p class="masked-key">Key: {{ s.masked_key }}</p>{% endif %}
       {% if s.provider == "ollama" %}
       <label>Base URL <input type="text" name="base_url" value="{{ s.base_url or '' }}" placeholder="http://localhost:11434"></label>
       {% else %}
@@ -18,14 +22,16 @@
       {% endif %}
       {% if s.last_successful_health_check %}<p class="empty-state">Last checked: {{ s.last_successful_health_check }}</p>{% endif %}
       {% if s.last_failure_reason %}<p class="empty-state">Last failure: {{ s.last_failure_reason }}</p>{% endif %}
-      <button type="button" onclick="testProvider('{{ s.provider }}')">Test Connection</button>
-      <button type="button" onclick="saveProvider('{{ s.provider }}')">Save</button>
-      {% if s.is_enabled %}
-      <button type="button" onclick="setEnabled('{{ s.provider }}', false)">Disable</button>
-      {% else %}
-      <button type="button" onclick="setEnabled('{{ s.provider }}', true)">Enable</button>
-      {% endif %}
-      <button type="button" onclick="deleteProvider('{{ s.provider }}')">Delete</button>
+      <div class="actions">
+        <button type="button" onclick="testProvider('{{ s.provider }}')">Test Connection</button>
+        <button type="button" class="btn-primary" onclick="saveProvider('{{ s.provider }}')">Save</button>
+        {% if s.is_enabled %}
+        <button type="button" onclick="setEnabled('{{ s.provider }}', false)">Disable</button>
+        {% else %}
+        <button type="button" onclick="setEnabled('{{ s.provider }}', true)">Enable</button>
+        {% endif %}
+        <button type="button" class="btn-danger" onclick="deleteProvider('{{ s.provider }}')">Delete</button>
+      </div>
       <p class="result" id="result-{{ s.provider }}"></p>
     </div>
     {% endfor %}
@@ -41,28 +47,34 @@ function _body(name) {
     base_url: baseUrl && baseUrl.value ? baseUrl.value : null,
   };
 }
-function _showResult(name, data) {
-  document.getElementById('result-' + name).textContent = JSON.stringify(data);
+function _showResult(name, data, successMessage) {
+  const el = document.getElementById('result-' + name);
+  el.dataset.state = data.reason ? 'error' : 'success';
+  el.textContent = data.reason || successMessage;
 }
 async function testProvider(name) {
   const res = await fetch('/v1/providers/' + name + '/test', {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(_body(name)),
   });
-  _showResult(name, await res.json());
+  _showResult(name, await res.json(), 'Connection OK.');
 }
 async function saveProvider(name) {
   const res = await fetch('/v1/providers/' + name + '/config', {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(_body(name)),
   });
-  _showResult(name, await res.json());
+  const data = await res.json();
+  _showResult(name, data, 'Saved and active.');
+  if (data.saved) setTimeout(() => window.location.reload(), 600);
 }
 async function setEnabled(name, enabled) {
   const res = await fetch('/v1/providers/' + name + '/' + (enabled ? 'enable' : 'disable'), {method: 'POST'});
-  _showResult(name, await res.json());
+  _showResult(name, await res.json(), enabled ? 'Enabled.' : 'Disabled.');
+  setTimeout(() => window.location.reload(), 600);
 }
 async function deleteProvider(name) {
   const res = await fetch('/v1/providers/' + name + '/config', {method: 'DELETE'});
-  _showResult(name, await res.json());
+  _showResult(name, await res.json(), 'Deleted.');
+  setTimeout(() => window.location.reload(), 600);
 }
 </script>
 {% endblock %}
