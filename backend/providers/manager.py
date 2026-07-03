@@ -1,4 +1,4 @@
-from backend.providers.base import BaseProvider
+from backend.providers.base import BaseProvider, ProviderUnavailableError
 from backend.providers.factory import ProviderFactory
 from backend.services.credential_store import CredentialStore
 from backend.telemetry.logging import get_logger, request_context
@@ -44,7 +44,7 @@ class ProviderManager:
 
     def get_provider(self, name: str) -> BaseProvider:
         if name not in self._providers:
-            raise KeyError(f"Provider '{name}' is not available")
+            raise ProviderUnavailableError(f"Provider '{name}' is not available")
         return self._providers[name]
 
     def is_provider_available(self, name: str) -> bool:

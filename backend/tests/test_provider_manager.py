@@ -8,7 +8,7 @@ from cryptography.fernet import Fernet
 
 from backend.config.settings import Settings
 from backend.database.base import create_engine_from_settings, create_session_factory, init_db
-from backend.providers.base import BaseProvider
+from backend.providers.base import BaseProvider, ProviderUnavailableError
 from backend.providers.factory import ProviderFactory
 from backend.providers.manager import ProviderManager
 from backend.providers.mock_provider import MockProvider
@@ -73,7 +73,7 @@ def test_openai_disabled_without_key(tmp_path):
     manager = ProviderManager(_make_factory(), credential_store)
 
     assert manager.is_provider_available("openai") is False
-    with pytest.raises(KeyError):
+    with pytest.raises(ProviderUnavailableError):
         manager.get_provider("openai")
 
 
