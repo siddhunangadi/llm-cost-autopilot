@@ -1,6 +1,6 @@
 [project]
 name = "llm-cost-autopilot"
-version = "0.1.0"
+version = "0.8.0"
 description = "Intelligent cost-aware routing layer for multiple LLM providers"
 requires-python = ">=3.11"
 dependencies = [

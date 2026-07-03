@@ -55,7 +55,7 @@ from backend.verification.engine import JudgeEngine
 from backend.verification.judge import BaseJudge, JudgeVerdict, LLMJudge
 from backend.verification.service import VerificationService
 
-APP_VERSION = "0.7.0"
+APP_VERSION = "0.8.0"
 
 
 class _UnavailableJudge(BaseJudge):

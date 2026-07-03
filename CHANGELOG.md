@@ -3,6 +3,35 @@
 All notable changes to this project are documented here. Versions
 correspond to the `vX.Y.0` git tags marking the end of each phase.
 
+## v0.8.0 — Advanced Analytics & Reporting (2026-07-03)
+
+Adds historical, trend-oriented analytics on top of the Phase 6/6b
+operations dashboard and Phase 7 optimization engine. Where the
+operations dashboard answers "what is happening right now," this phase
+answers "how has the platform evolved over the last N days." This is the
+last phase on the project's roadmap.
+
+**Added**
+- `AnalyticsService` — read-only, composes five daily trends into one
+  `AnalyticsReport`; never writes, never refreshes recommendations, never
+  touches routing or learning state (same invariant as `DashboardService`)
+- `DashboardRepository.get_failover_trend` / `get_routing_distribution` /
+  `get_recommendation_trend` — three new query methods, following the
+  existing fetch-then-group-in-Python pattern already used by
+  `get_cost_trend`/`get_quality_trend`
+- `GET /v1/analytics/report?days=30` — JSON API, reuses the existing
+  `TimeWindow` abstraction, `days` query param
+- `GET /dashboard/analytics?days=30` — single-render HTML page (cost,
+  quality, routing distribution, failover, and recommendation-generation
+  trend charts via Chart.js); explicitly **not** HTMX-polled, unlike
+  `/dashboard` — analytics is historical, not live operational state
+- Nav link between `/dashboard` and `/dashboard/analytics`
+
+**Explicitly out of scope** (deferred, not planned for a future phase):
+spend forecasting, provider-performance-over-time trends, recommendation
+*impact* tracking (dollars actually saved after a recommendation was
+acted on), any new database tables or migrations.
+
 ## v0.3.0 — Quality Verification & Evaluation (2026-07-02)
 
 Adds an in-process, background LLM-as-judge pipeline that scores every
