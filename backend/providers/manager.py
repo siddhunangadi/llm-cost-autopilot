@@ -3,8 +3,6 @@ from backend.providers.factory import ProviderFactory
 from backend.services.credential_store import CredentialStore
 from backend.telemetry.logging import get_logger, request_context
 
-KNOWN_PROVIDER_NAMES = ("openai", "anthropic", "ollama")
-
 
 class ProviderManager:
     def __init__(self, factory: ProviderFactory, credential_store: CredentialStore) -> None:
@@ -17,7 +15,7 @@ class ProviderManager:
         # startup rather than being swallowed here.
         self._providers: dict[str, BaseProvider] = {"mock": factory.create("mock", None)}
 
-        for name in KNOWN_PROVIDER_NAMES:
+        for name in self._factory.registered_names():
             credential = credential_store.get(name)
             if credential is not None:
                 self._try_build(name, credential)
@@ -50,8 +48,11 @@ class ProviderManager:
     def is_provider_available(self, name: str) -> bool:
         return name in self._providers
 
+    def registered_names(self) -> tuple[str, ...]:
+        return self._factory.registered_names()
+
     def list_providers(self) -> dict[str, str]:
         return {
             name: ("available" if name in self._providers else "disabled")
-            for name in KNOWN_PROVIDER_NAMES
+            for name in self._factory.registered_names()
         }

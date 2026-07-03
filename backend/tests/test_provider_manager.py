@@ -13,14 +13,18 @@ from backend.providers.factory import ProviderFactory
 from backend.providers.manager import ProviderManager
 from backend.providers.mock_provider import MockProvider
 from backend.providers.openai_provider import OpenAIProvider
+from backend.providers.anthropic_provider import AnthropicProvider
+from backend.providers.ollama_provider import OllamaProvider
 from backend.services.credential_store import CredentialStore
 from backend.telemetry.logging import JsonFormatter
 
 
 def _make_factory():
     factory = ProviderFactory()
-    factory.register("mock", MockProvider)
+    factory.register("mock", MockProvider, user_configurable=False)
     factory.register("openai", OpenAIProvider)
+    factory.register("anthropic", AnthropicProvider)
+    factory.register("ollama", OllamaProvider)
     return factory
 
 
@@ -98,7 +102,7 @@ def test_list_providers_covers_known_providers(tmp_path):
 
 def test_optional_provider_initialization_failure_is_recorded_as_unavailable(tmp_path):
     factory = ProviderFactory()
-    factory.register("mock", MockProvider)
+    factory.register("mock", MockProvider, user_configurable=False)
     factory.register("openai", _BrokenProvider)
 
     credential_store = _make_credential_store(tmp_path, openai_api_key="sk-test")
@@ -111,7 +115,7 @@ def test_optional_provider_initialization_failure_is_recorded_as_unavailable(tmp
 
 def test_optional_provider_initialization_failure_is_logged(tmp_path):
     factory = ProviderFactory()
-    factory.register("mock", MockProvider)
+    factory.register("mock", MockProvider, user_configurable=False)
     factory.register("openai", _BrokenProvider)
 
     logger = logging.getLogger("providers")
@@ -137,7 +141,7 @@ def test_optional_provider_initialization_failure_is_logged(tmp_path):
 
 def test_mandatory_mock_provider_initialization_failure_is_not_swallowed(tmp_path):
     factory = ProviderFactory()
-    factory.register("mock", _BrokenProvider)
+    factory.register("mock", _BrokenProvider, user_configurable=False)
 
     credential_store = _make_credential_store(tmp_path)
 
@@ -179,3 +183,10 @@ def test_reload_provider_only_touches_the_named_provider(tmp_path):
     manager.reload_provider("openai")
 
     assert manager.get_provider("mock") is mock_before
+
+
+def test_registered_names_delegates_to_factory(tmp_path):
+    credential_store = _make_credential_store(tmp_path)
+    manager = ProviderManager(_make_factory(), credential_store)
+
+    assert manager.registered_names() == ("openai", "anthropic", "ollama")
