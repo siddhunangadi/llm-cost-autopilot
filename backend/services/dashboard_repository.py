@@ -70,6 +70,12 @@ class FailoverEvent:
     occurred_at: datetime
 
 
+@dataclass(frozen=True)
+class FailoverTrendBucket:
+    date: date
+    failover_count: int
+
+
 def _avg(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 
@@ -236,6 +242,33 @@ class DashboardRepository:
             if len(group) == 2
         ]
         return sorted(events, key=lambda e: e.occurred_at)
+
+    def get_failover_trend(self, window: TimeWindow) -> list[FailoverTrendBucket]:
+        with self._session_factory() as session:
+            rows = (
+                session.query(RoutingEventRow)
+                .filter(RoutingEventRow.created_at >= window.cutoff)
+                .order_by(RoutingEventRow.request_id, RoutingEventRow.created_at)
+                .all()
+            )
+
+        grouped: dict[str, list[RoutingEventRow]] = {}
+        for row in rows:
+            grouped.setdefault(row.request_id, []).append(row)
+
+        # Same failover predicate as get_failover_events: exactly two
+        # routing events for a request_id. Bucketed by the day of the
+        # second (failover) event and counted, not listed.
+        buckets: dict[date, int] = {}
+        for group in grouped.values():
+            if len(group) == 2:
+                day = group[1].created_at.date()
+                buckets[day] = buckets.get(day, 0) + 1
+
+        return [
+            FailoverTrendBucket(date=day, failover_count=count)
+            for day, count in sorted(buckets.items())
+        ]
 
     def get_recent_requests(self, limit: int = 50) -> list[RecentRequestRow]:
         with self._session_factory() as session:
