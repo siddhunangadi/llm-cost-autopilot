@@ -55,17 +55,7 @@
     <script>
       new Chart(document.getElementById('routing-distribution-chart'), {
         type: 'bar',
-        data: {
-          labels: {{ report.routing_distribution | map(attribute='date') | map('string') | unique | list | tojson }},
-          datasets: [
-            {% for model in report.routing_distribution | map(attribute='model') | unique | list %}
-            {
-              label: {{ model | tojson }},
-              data: {{ report.routing_distribution | selectattr('model', 'equalto', model) | map(attribute='request_count') | list | tojson }},
-            },
-            {% endfor %}
-          ],
-        },
+        data: {{ routing_chart | tojson }},
       });
     </script>
     {% endif %}

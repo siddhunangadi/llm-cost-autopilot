@@ -4,9 +4,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.api.main import create_app
+from backend.api.routers.analytics import _routing_chart
 from backend.database.models import (
     RecommendationRow, RequestRow, ResponseRow, RoutingEventRow, VerificationRow,
 )
+from backend.services.analytics_service import RoutingDistributionPoint
 from backend.verification.status import VerificationStatus
 
 
@@ -96,3 +98,24 @@ def test_analytics_page_handles_empty_database(tmp_path, monkeypatch):
 
         assert response.status_code == 200
         assert "No cost data yet" in response.text
+
+
+def test_routing_chart_zero_fills_series_when_models_dont_overlap_every_day():
+    from datetime import date
+
+    day1, day2 = date(2026, 7, 1), date(2026, 7, 2)
+    points = [
+        RoutingDistributionPoint(date=day1, model="gpt-4o-mini", request_count=3),
+        RoutingDistributionPoint(date=day2, model="gpt-4o-mini", request_count=1),
+        RoutingDistributionPoint(date=day2, model="gpt-4o", request_count=5),
+    ]
+
+    chart = _routing_chart(points)
+
+    assert chart["labels"] == ["2026-07-01", "2026-07-02"]
+    datasets = {d["label"]: d["data"] for d in chart["datasets"]}
+    # gpt-4o never appeared on day1 -- its series must be zero-filled there,
+    # not shifted left to align with day2's label (the Chart.js
+    # positional-mapping bug this test guards against).
+    assert datasets["gpt-4o-mini"] == [3, 1]
+    assert datasets["gpt-4o"] == [0, 5]
