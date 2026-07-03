@@ -3,7 +3,9 @@ from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy.orm import sessionmaker
 
-from backend.database.models import RequestRow, ResponseRow, RoutingEventRow, VerificationRow
+from backend.database.models import (
+    RecommendationRow, RequestRow, ResponseRow, RoutingEventRow, VerificationRow,
+)
 from backend.verification.status import VerificationStatus
 
 
@@ -74,6 +76,20 @@ class FailoverEvent:
 class FailoverTrendBucket:
     date: date
     failover_count: int
+
+
+@dataclass(frozen=True)
+class RoutingDistributionBucket:
+    date: date
+    model: str
+    request_count: int
+
+
+@dataclass(frozen=True)
+class RecommendationTrendBucket:
+    date: date
+    generated_count: int
+    open_count: int
 
 
 def _avg(values: list[float]) -> float:
@@ -268,6 +284,49 @@ class DashboardRepository:
         return [
             FailoverTrendBucket(date=day, failover_count=count)
             for day, count in sorted(buckets.items())
+        ]
+
+    def get_routing_distribution(self, window: TimeWindow) -> list[RoutingDistributionBucket]:
+        with self._session_factory() as session:
+            rows = (
+                session.query(RoutingEventRow)
+                .filter(RoutingEventRow.created_at >= window.cutoff)
+                .all()
+            )
+
+        buckets: dict[tuple[date, str], int] = {}
+        for row in rows:
+            key = (row.created_at.date(), row.selected_model)
+            buckets[key] = buckets.get(key, 0) + 1
+
+        return [
+            RoutingDistributionBucket(date=day, model=model, request_count=count)
+            for (day, model), count in sorted(buckets.items())
+        ]
+
+    def get_recommendation_trend(self, window: TimeWindow) -> list[RecommendationTrendBucket]:
+        with self._session_factory() as session:
+            rows = (
+                session.query(RecommendationRow)
+                .filter(RecommendationRow.created_at >= window.cutoff)
+                .all()
+            )
+
+        buckets: dict[date, list[RecommendationRow]] = {}
+        for row in rows:
+            day = row.created_at.date()
+            buckets.setdefault(day, []).append(row)
+
+        # open_count is a simplification: recommendations generated that
+        # day whose *current* status is still "new" as of report
+        # generation time, not a true point-in-time daily open count.
+        return [
+            RecommendationTrendBucket(
+                date=day,
+                generated_count=len(group),
+                open_count=sum(1 for r in group if r.status == "new"),
+            )
+            for day, group in sorted(buckets.items())
         ]
 
     def get_recent_requests(self, limit: int = 50) -> list[RecentRequestRow]:
