@@ -33,10 +33,15 @@ from backend.providers.anthropic_provider import AnthropicProvider
 from backend.providers.circuit_breaker import CircuitBreaker
 from backend.providers.executor import ProviderExecutor
 from backend.providers.factory import ProviderFactory
+from backend.providers.gemini_provider import GeminiProvider
+from backend.providers.groq_provider import GroqProvider
 from backend.providers.manager import ProviderManager
+from backend.providers.mistral_provider import MistralProvider
 from backend.providers.mock_provider import MockProvider
+from backend.providers.nvidia_nim_provider import NvidiaNimProvider
 from backend.providers.ollama_provider import OllamaProvider
 from backend.providers.openai_provider import OpenAIProvider
+from backend.providers.openrouter_provider import OpenRouterProvider
 from backend.providers.retry import ExponentialBackoffRetryPolicy
 from backend.routing.config_loader import RoutingConfigLoader
 from backend.routing.engine import RoutingEngine
@@ -83,6 +88,11 @@ def _build_provider_factory() -> ProviderFactory:
     factory.register("openai", OpenAIProvider)
     factory.register("anthropic", AnthropicProvider)
     factory.register("ollama", OllamaProvider)
+    factory.register("gemini", GeminiProvider)
+    factory.register("nvidia_nim", NvidiaNimProvider)
+    factory.register("openrouter", OpenRouterProvider)
+    factory.register("groq", GroqProvider)
+    factory.register("mistral", MistralProvider)
     return factory
 
 
@@ -164,7 +174,7 @@ async def lifespan(app: FastAPI):
     provider_executor = ProviderExecutor(
         provider_manager=provider_manager,
         retry_policy=ExponentialBackoffRetryPolicy(),
-        circuit_breakers={name: CircuitBreaker() for name in provider_manager.registered_names()},
+        circuit_breakers={name: CircuitBreaker() for name in provider_factory.registered_names()},
         event_bus=event_bus,
     )
 

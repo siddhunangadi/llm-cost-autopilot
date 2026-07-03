@@ -38,7 +38,10 @@ def test_dashboard_overview_returns_expected_shape(tmp_path, monkeypatch):
         assert response.status_code == 200
         body = response.json()
         assert "generated_at" in body
-        assert set(body["providers"].keys()) == {"openai", "anthropic", "ollama"}
+        assert set(body["providers"].keys()) == {
+            "openai", "anthropic", "ollama",
+            "gemini", "nvidia_nim", "openrouter", "groq", "mistral",
+        }
         assert body["quality"]["total_verified"] == 1
         assert body["failovers"]["total_failovers"] == 0
         assert body["recommendations"] == []

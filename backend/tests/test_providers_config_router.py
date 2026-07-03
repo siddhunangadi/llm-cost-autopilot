@@ -23,7 +23,10 @@ def test_list_provider_config_unconfigured_by_default(tmp_path, monkeypatch):
 
         assert response.status_code == 200
         statuses = {s["provider"]: s for s in response.json()}
-        assert set(statuses) == {"openai", "anthropic", "ollama"}
+        assert set(statuses) == {
+            "openai", "anthropic", "ollama",
+            "gemini", "nvidia_nim", "openrouter", "groq", "mistral",
+        }
         assert statuses["openai"]["configured"] is False
         assert statuses["openai"]["healthy"] is False
 
