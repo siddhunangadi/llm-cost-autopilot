@@ -109,3 +109,79 @@ def test_complexity_tier_rule_skips_below_min_samples():
     rule = ComplexityTierRule(DetectionRuleConfig(min_samples=30, pass_rate_threshold=0.5))
 
     assert rule.evaluate(rows) == []
+
+
+from backend.learning.rules import OverpoweredModelRule
+
+
+def test_overpowered_model_rule_emits_finding_at_or_above_threshold():
+    rows = (
+        [_row("gpt-4o", "balanced", "complex", passed=True) for _ in range(18)]
+        + [_row("gpt-4o", "balanced", "complex", passed=False) for _ in range(2)]
+    )  # 20 samples, pass_rate = 0.9 >= 0.7
+    rule = OverpoweredModelRule(DetectionRuleConfig(min_samples=20, pass_rate_threshold=0.7))
+
+    findings = rule.evaluate(rows)
+
+    assert len(findings) == 1
+    assert findings[0].rule_type == RuleType.COST_OPTIMIZATION
+    assert findings[0].subject == "gpt-4o:complex"
+    assert findings[0].sample_size == 20
+    assert findings[0].pass_rate == pytest.approx(0.9)
+    assert findings[0].threshold == 0.7
+
+
+def test_overpowered_model_rule_skips_below_min_samples():
+    rows = [_row("gpt-4o", "balanced", "complex", passed=True) for _ in range(5)]
+    rule = OverpoweredModelRule(DetectionRuleConfig(min_samples=20, pass_rate_threshold=0.7))
+
+    assert rule.evaluate(rows) == []
+
+
+def test_overpowered_model_rule_skips_below_pass_rate():
+    rows = (
+        [_row("gpt-4o", "balanced", "complex", passed=True) for _ in range(13)]
+        + [_row("gpt-4o", "balanced", "complex", passed=False) for _ in range(7)]
+    )  # pass_rate = 0.65 < 0.7
+    rule = OverpoweredModelRule(DetectionRuleConfig(min_samples=20, pass_rate_threshold=0.7))
+
+    assert rule.evaluate(rows) == []
+
+
+def test_overpowered_model_rule_excludes_non_completed_rows():
+    rows = (
+        [_row("gpt-4o", "balanced", "complex", passed=True) for _ in range(20)]
+        + [
+            _row("gpt-4o", "balanced", "complex", passed=None, status=VerificationStatus.FAILED.value)
+            for _ in range(50)
+        ]
+    )
+    rule = OverpoweredModelRule(DetectionRuleConfig(min_samples=20, pass_rate_threshold=0.7))
+
+    findings = rule.evaluate(rows)
+
+    assert len(findings) == 1
+    assert findings[0].sample_size == 20  # the 50 non-completed rows are excluded
+
+
+def test_overpowered_model_rule_at_most_one_finding_per_pair():
+    rows = [_row("gpt-4o", "balanced", "complex", passed=True) for _ in range(500)]
+    rule = OverpoweredModelRule(DetectionRuleConfig(min_samples=20, pass_rate_threshold=0.7))
+
+    findings = rule.evaluate(rows)
+
+    assert len(findings) == 1
+
+
+def test_overpowered_model_rule_deterministic_ordering():
+    rows = (
+        [_row("gpt-4o-mini", "balanced", "simple", passed=True) for _ in range(20)]
+        + [_row("gpt-4o", "balanced", "complex", passed=True) for _ in range(20)]
+        + [_row("claude-3-haiku", "balanced", "medium", passed=True) for _ in range(20)]
+    )
+    rule = OverpoweredModelRule(DetectionRuleConfig(min_samples=20, pass_rate_threshold=0.7))
+
+    findings = rule.evaluate(rows)
+
+    subjects = [f.subject for f in findings]
+    assert subjects == sorted(subjects)  # (model, complexity) ascending
