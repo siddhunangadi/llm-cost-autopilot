@@ -2,7 +2,6 @@ import asyncio
 import hashlib
 from collections.abc import AsyncIterator
 
-from backend.config.settings import Settings
 from backend.providers.base import BaseProvider
 from backend.services.cost_estimator import calculate_linear_cost
 
@@ -25,7 +24,7 @@ class MockProvider(BaseProvider):
 
     def __init__(
         self,
-        settings: Settings | None = None,
+        credential=None,
         *,
         response: str | None = None,
         latency_ms: float = 0,

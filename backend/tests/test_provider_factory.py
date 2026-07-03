@@ -1,23 +1,22 @@
 import pytest
 
-from backend.config.settings import Settings
 from backend.providers.factory import ProviderFactory
 from backend.providers.mock_provider import MockProvider
+from backend.services.credential_store import ProviderCredential
 
 
 def test_register_and_create_returns_instance():
     factory = ProviderFactory()
     factory.register("mock", MockProvider)
 
-    settings = Settings(_env_file=None)
-    provider = factory.create("mock", settings)
+    provider = factory.create("mock", None)
 
     assert isinstance(provider, MockProvider)
 
 
 def test_create_unregistered_provider_raises():
     factory = ProviderFactory()
-    settings = Settings(_env_file=None)
+    credential = ProviderCredential("unknown", None, None)
 
     with pytest.raises(KeyError):
-        factory.create("unknown", settings)
+        factory.create("unknown", credential)

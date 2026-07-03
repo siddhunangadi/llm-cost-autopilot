@@ -1,5 +1,5 @@
-from backend.config.settings import Settings
 from backend.providers.base import BaseProvider
+from backend.services.credential_store import ProviderCredential
 
 
 class ProviderFactory:
@@ -9,7 +9,7 @@ class ProviderFactory:
     def register(self, name: str, provider_cls: type[BaseProvider]) -> None:
         self._registry[name] = provider_cls
 
-    def create(self, name: str, settings: Settings) -> BaseProvider:
+    def create(self, name: str, credential: ProviderCredential | None) -> BaseProvider:
         if name not in self._registry:
             raise KeyError(f"No provider registered under name '{name}'")
-        return self._registry[name](settings)
+        return self._registry[name](credential)

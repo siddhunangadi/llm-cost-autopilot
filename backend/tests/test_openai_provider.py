@@ -3,9 +3,9 @@ from unittest.mock import AsyncMock
 import pytest
 from openai import OpenAIError
 
-from backend.config.settings import Settings
 from backend.providers.base import ProviderError
 from backend.providers.openai_provider import OpenAIProvider
+from backend.services.credential_store import ProviderCredential
 
 
 class _FakeMessage:
@@ -24,8 +24,8 @@ class _FakeCompletion:
 
 
 def _make_provider():
-    settings = Settings(_env_file=None, openai_api_key="sk-test")
-    return OpenAIProvider(settings)
+    credential = ProviderCredential("openai", "sk-test", None)
+    return OpenAIProvider(credential)
 
 
 def test_name_is_openai():
