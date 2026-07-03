@@ -136,9 +136,15 @@ class CredentialStore:
                 .filter_by(provider_name=provider_name)
                 .first()
             )
-            if row is not None:
-                row.last_failure_reason = failure_reason
-                session.commit()
+            if row is None:
+                # No credential has ever been saved for this provider -- track
+                # the failure anyway so a first-attempt failure isn't silently
+                # dropped. Leave it unconfigured/disabled since no credential
+                # material was actually persisted.
+                row = ProviderCredentialRow(provider_name=provider_name, is_enabled=False)
+                session.add(row)
+            row.last_failure_reason = failure_reason
+            session.commit()
 
     def set_enabled(self, provider_name: str, enabled: bool) -> None:
         with self._session_factory() as session:
@@ -164,7 +170,14 @@ class CredentialStore:
         result = []
         for name in KNOWN_PROVIDER_NAMES:
             row = rows.get(name)
-            if row is not None:
+            # A row can exist purely to record a health-check failure from a
+            # save attempt that never actually persisted credential material
+            # (see record_health_check_failure) -- that must not read as
+            # "configured".
+            has_credential_material = row is not None and (
+                row.encrypted_api_key is not None or row.base_url is not None
+            )
+            if has_credential_material:
                 result.append(ProviderConfigStatus(
                     provider=name,
                     configured=True,
@@ -185,6 +198,6 @@ class CredentialStore:
                     is_enabled=True,
                     healthy=is_healthy_fn(name),
                     last_successful_health_check=None,
-                    last_failure_reason=None,
+                    last_failure_reason=row.last_failure_reason if row is not None else None,
                 ))
         return result
