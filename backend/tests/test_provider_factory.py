@@ -20,3 +20,26 @@ def test_create_unregistered_provider_raises():
 
     with pytest.raises(KeyError):
         factory.create("unknown", credential)
+
+
+def test_registered_names_excludes_non_user_configurable():
+    factory = ProviderFactory()
+    factory.register("mock", MockProvider, user_configurable=False)
+    factory.register("openai_alias", MockProvider)
+
+    assert factory.registered_names() == ("openai_alias",)
+
+
+def test_registered_names_preserves_registration_order():
+    factory = ProviderFactory()
+    factory.register("b", MockProvider)
+    factory.register("a", MockProvider)
+
+    assert factory.registered_names() == ("b", "a")
+
+
+def test_registered_names_defaults_to_user_configurable_true():
+    factory = ProviderFactory()
+    factory.register("mock", MockProvider)
+
+    assert factory.registered_names() == ("mock",)
