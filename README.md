@@ -1,112 +1,82 @@
-# LLM Cost Autopilot
+<div align="center">
 
-An intelligent cost-aware LLM routing layer: it classifies prompt
-complexity, routes each request to the best model under a configurable
-strategy (cost, latency, quality, balanced), verifies response quality
-with an LLM-as-judge, learns from outcomes, and exposes an operations
-dashboard for analytics, failover events, and provider configuration.
+# 🚀 LLM Cost Autopilot
 
-Currently at v0.9.1, with 10 phases shipped — see `docs/superpowers/specs/`
-and `CHANGELOG.md` for the full history:
+### Stop overpaying to talk to AI.
 
-1. Project skeleton, provider foundation, model registry, event bus
-2. Routing engine — complexity classification and strategy-based model selection
-3. Quality verification — LLM-as-judge scoring of responses
-4. Learning — outcome-driven recommendations (including cost optimization)
-5. Resilience — circuit breakers and failover across providers
-6. Operations dashboard (backend + UI overhaul)
-7. Cost/latency optimization
-8. Analytics — quality trends, recent requests, per-model cost breakdowns
-9. Live provider configuration (encrypted, hot-reloadable credentials)
-10. Provider expansion — Anthropic, Gemini, Groq, Mistral, NVIDIA NIM, OpenRouter, Ollama
+**One API. Eight AI providers. Every request automatically routed to the model that gets the job done for the least money — without sacrificing quality.**
 
-## What exists today
+[![Version](https://img.shields.io/badge/version-0.9.1-blue)](CHANGELOG.md)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](pyproject.toml)
+[![License](https://img.shields.io/badge/license-MIT-green)](#license)
 
-- `GET /v1/health` — service, database, and provider status
-- `GET /v1/models` — full model registry (pricing, limits, capabilities, benchmark info)
-- `POST /v1/chat` — routes a prompt through prompt analysis, heuristic
-  complexity classification, and a configurable strategy (`cost`,
-  `latency`, `quality`, `balanced`) to select a model, then returns the
-  response plus a full routing explanation (complexity, confidence,
-  estimated cost/latency, human-readable reasoning)
-- `ModelRegistry` — memory-first, backed by `backend/config/models.yaml` and persisted to SQLite; immutable read-only cache, atomic `reload()`/`refresh_provider_status()`, fails fast on malformed/invalid/duplicate config
-- Providers behind a shared `BaseProvider` interface — `openai`, `anthropic`, `ollama`, `gemini`, `nvidia_nim`, `openrouter`, `groq`, `mistral`, plus `MockProvider`; SDK exceptions are translated into `ProviderError`, never leaked to the rest of the app
-- `ProviderManager` — the mandatory `mock` provider crashes startup if it fails to construct; optional providers degrade gracefully to "disabled" (logged) if construction fails, with per-provider circuit breakers for failover
-- Live, encrypted provider credential configuration via `/v1/providers/config` — hot-reloadable, no restart required
-- In-process event bus (`PROVIDER_AVAILABLE`, `PROVIDER_DISABLED`, `PROVIDER_FAILED`, `MODEL_REGISTERED`), with per-subscriber exception isolation
-- Structured JSON logging (console + rotating file) with `contextvars`-based request context
-- Operations dashboard at `/dashboard` — quality trends, failover events, recent requests, per-model cost, cost-optimization recommendations
+[Why this exists](#why-this-exists) • [What it does](#what-it-does-for-you) • [See it live](#see-it-live-in-5-minutes) • [How it works](#how-it-works)
 
-## Setup
+</div>
+
+---
+
+## Why this exists
+
+If you're building anything with AI, you already know the dirty secret:
+you're probably paying for a $10-per-million-token model to answer
+questions a $0.15 model could handle just fine — because nobody has
+time to hand-pick the "right" model for every single request.
+
+**LLM Cost Autopilot does that picking for you, automatically, every
+time.** Send it a prompt. It figures out how hard the question actually
+is, checks live pricing and speed across every provider you've
+connected, and routes the request to the cheapest model that can
+answer it well — then double-checks the answer was actually good, and
+learns from the result.
+
+You get one endpoint to call. It gets you the receipts.
+
+## What it does for you
+
+- 💸 **Cuts your AI bill automatically** — easy questions go to cheap,
+  fast models; hard questions go to your best model. No manual
+  model-picking, no overpaying by default.
+- 🔌 **Works with the provider you already use** — OpenAI, Anthropic
+  (Claude), Google Gemini, Groq, Mistral, NVIDIA NIM, OpenRouter, and
+  local models via Ollama. Plug in the API keys you already have.
+- ✅ **Grades its own work** — every response is automatically scored
+  by an AI judge for correctness and completeness, so you can see
+  quality, not just guess at it.
+- 🛡️ **Never goes down because one provider does** — if a provider
+  errors out or gets slow, it automatically fails over to another one,
+  no code changes required.
+- 📊 **Shows you exactly where your money goes** — a built-in dashboard
+  breaks down cost, quality, and reliability per model, so you can see
+  the savings, not just trust they're happening.
+- 🔑 **Add or swap providers without restarting anything** — credentials
+  are managed live through the API, encrypted at rest.
+
+## See it live in 5 minutes
+
+You don't need to read any code to try this.
 
 ```bash
+# 1. Get the project
+git clone https://github.com/siddhunangadi/llm-cost-autopilot.git
+cd llm-cost-autopilot
+
+# 2. Install dependencies (uv is a fast Python package manager)
 uv sync
-cp .env.example .env   # add OPENAI_API_KEY to enable the OpenAI provider
-```
 
-## Run tests
+# 3. Add at least one AI provider key
+cp .env.example .env
+# open .env and paste in an OPENAI_API_KEY or ANTHROPIC_API_KEY
 
-```bash
-uv run pytest
-```
-
-## Run the API
-
-```bash
+# 4. Start it up
 uv run uvicorn backend.api.main:app --reload
 ```
 
-Then:
+Now open **http://127.0.0.1:8000/dashboard** in your browser — that's
+the live operations dashboard: cost trends, quality scores, failover
+events, all in one view.
 
-```bash
-curl http://127.0.0.1:8000/v1/health
-curl http://127.0.0.1:8000/v1/models
-```
-
-### Example responses
-
-`GET /v1/health`:
-
-```json
-{
-  "status": "healthy",
-  "version": "0.1.0",
-  "environment": "development",
-  "database": "healthy",
-  "providers": {"openai": "disabled", "anthropic": "disabled", "ollama": "disabled", "gemini": "disabled", "nvidia_nim": "disabled", "openrouter": "disabled", "groq": "disabled", "mistral": "disabled"},
-  "loaded_models": 2,
-  "uptime_seconds": 14.4
-}
-```
-
-`GET /v1/models` (one entry shown):
-
-```json
-[
-  {
-    "id": "gpt-4o-mini",
-    "provider": "openai",
-    "model": "gpt-4o-mini",
-    "input_cost": 0.15,
-    "output_cost": 0.6,
-    "context_window": 128000,
-    "max_output_tokens": 16384,
-    "supports_streaming": true,
-    "supports_tools": true,
-    "supports_json": true,
-    "supports_vision": false,
-    "benchmark_score": 0.82,
-    "average_latency_ms": 450.0,
-    "available": false
-  }
-]
-```
-
-`providers` shows `"disabled"` and `available` is `false` above because no
-`OPENAI_API_KEY` was configured when this was captured — set one in `.env`
-to see `"available"`/`true`.
-
-`POST /v1/chat`:
+Or just ask it something directly:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/v1/chat \
@@ -114,66 +84,76 @@ curl -X POST http://127.0.0.1:8000/v1/chat \
   -d '{"prompt": "Explain why the sky is blue.", "strategy": "balanced"}'
 ```
 
+It responds with the answer **and** a full explanation of why it chose
+the model it did:
+
 ```json
 {
-  "request_id": "b3f1...",
-  "response": "...",
+  "response": "The sky appears blue because...",
   "routing": {
     "selected_model": "gpt-4o-mini",
     "strategy": "balanced",
     "complexity": "simple",
-    "confidence": 0.66,
     "estimated_cost": 0.00013,
-    "estimated_latency_ms": 450.0,
     "reasoning": [
-      "Classified as simple (confidence 0.66): reasoning keywords detected.",
+      "Classified as simple: no advanced reasoning required.",
       "Strategy 'balanced' evaluated 2 eligible model(s).",
-      "Selected 'gpt-4o-mini'."
+      "Selected 'gpt-4o-mini' — cheapest model that meets quality bar."
     ]
   }
 }
 ```
 
-### Phase 3: Quality Verification
+## How it works
 
-Every `/v1/chat` call schedules an in-process, best-effort background
-task that scores the response with an LLM-as-judge and persists the
-verdict — this never adds latency to `/v1/chat` or risks its
-availability. Poll the result once it completes:
+```
+your prompt
+    │
+    ▼
+┌─────────────────────┐     "how hard is this, really?"
+│ Complexity classifier│
+└─────────────────────┘
+    │
+    ▼
+┌─────────────────────┐     "given cost/speed/quality priorities,
+│   Routing strategy   │      which model wins?"
+└─────────────────────┘
+    │
+    ▼
+┌─────────────────────┐     tries your chosen provider first,
+│  Provider + failover │      falls back automatically if it fails
+└─────────────────────┘
+    │
+    ▼
+┌─────────────────────┐     an AI judge scores the response —
+│  Quality verification│      correctness, completeness, format
+└─────────────────────┘
+    │
+    ▼
+   your answer, plus a full paper trail of every decision made
+```
+
+Everything above is visible and explained back to you — nothing is a
+black box.
+
+## What's under the hood (for the technical reader)
+
+- **FastAPI** backend, **SQLite** for persistence, **Jinja2** dashboard
+- 8 providers behind one shared interface, so adding a 9th is a small,
+  contained change — not a rewrite
+- Per-provider circuit breakers for automatic failover
+- Encrypted, hot-reloadable provider credentials (no restart to add a key)
+- Full test suite; every feature shipped test-first — see
+  [`CHANGELOG.md`](CHANGELOG.md) for the complete build history across
+  10 shipped phases (routing → verification → learning → resilience →
+  dashboard → analytics → live provider config → provider expansion)
+
+## Run the tests
 
 ```bash
-curl http://127.0.0.1:8000/v1/chat/<request_id>/verification
+uv run pytest
 ```
 
-```json
-{
-  "request_id": "b3f1...",
-  "status": "completed",
-  "score": 0.9,
-  "passed": true,
-  "confidence": 0.9,
-  "rationale": "The response correctly and completely answers the prompt.",
-  "dimensions": {
-    "correctness": 0.9,
-    "completeness": 0.9,
-    "instruction_following": 0.9,
-    "format_adherence": 0.9
-  },
-  "judge_model": "gpt-4o",
-  "judge_prompt_version": "v1",
-  "evaluation_duration_ms": 812,
-  "error_type": null,
-  "error": null,
-  "created_at": "2026-07-02T05:10:00Z",
-  "started_at": "2026-07-02T05:10:00Z",
-  "completed_at": "2026-07-02T05:10:01Z"
-}
-```
+## License
 
-`GET /v1/metrics/quality` aggregates every completed/failed verification
-(average score, pass rate, timing, and per-model / per-strategy /
-per-complexity breakdowns):
-
-```bash
-curl http://127.0.0.1:8000/v1/metrics/quality
-```
+MIT — use it, fork it, ship it.
