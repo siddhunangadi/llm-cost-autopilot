@@ -9,6 +9,9 @@
 [![Version](https://img.shields.io/badge/version-0.9.1-blue)](CHANGELOG.md)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](pyproject.toml)
 [![License](https://img.shields.io/badge/license-MIT-green)](#license)
+[![Live Demo](https://img.shields.io/badge/demo-live-brightgreen)](https://llm-cost-autopilot-hjoy.onrender.com/dashboard)
+
+### 🔗 [**Try the live demo →**](https://llm-cost-autopilot-hjoy.onrender.com/dashboard)
 
 [Why this exists](#why-this-exists) • [What it does](#what-it-does-for-you) • [See it live](#see-it-live-in-5-minutes) • [How it works](#how-it-works)
 
