@@ -7,3 +7,5 @@ logs/
 .env
 .coverage
 htmlcov/
+.DS_Store
+.claude/
