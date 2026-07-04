@@ -1,7 +1,24 @@
 # LLM Cost Autopilot
 
-Phase 1: project skeleton, provider foundation, model registry, and event
-bus for an intelligent cost-aware LLM routing layer.
+An intelligent cost-aware LLM routing layer: it classifies prompt
+complexity, routes each request to the best model under a configurable
+strategy (cost, latency, quality, balanced), verifies response quality
+with an LLM-as-judge, learns from outcomes, and exposes an operations
+dashboard for analytics, failover events, and provider configuration.
+
+Currently at v0.9.1, with 10 phases shipped — see `docs/superpowers/specs/`
+and `CHANGELOG.md` for the full history:
+
+1. Project skeleton, provider foundation, model registry, event bus
+2. Routing engine — complexity classification and strategy-based model selection
+3. Quality verification — LLM-as-judge scoring of responses
+4. Learning — outcome-driven recommendations (including cost optimization)
+5. Resilience — circuit breakers and failover across providers
+6. Operations dashboard (backend + UI overhaul)
+7. Cost/latency optimization
+8. Analytics — quality trends, recent requests, per-model cost breakdowns
+9. Live provider configuration (encrypted, hot-reloadable credentials)
+10. Provider expansion — Anthropic, Gemini, Groq, Mistral, NVIDIA NIM, OpenRouter, Ollama
 
 ## What exists today
 
@@ -13,13 +30,12 @@ bus for an intelligent cost-aware LLM routing layer.
   response plus a full routing explanation (complexity, confidence,
   estimated cost/latency, human-readable reasoning)
 - `ModelRegistry` — memory-first, backed by `backend/config/models.yaml` and persisted to SQLite; immutable read-only cache, atomic `reload()`/`refresh_provider_status()`, fails fast on malformed/invalid/duplicate config
-- `OpenAIProvider` and `MockProvider` behind a shared `BaseProvider` interface; SDK exceptions are translated into `ProviderError`, never leaked to the rest of the app
-- `ProviderManager` — the mandatory `mock` provider crashes startup if it fails to construct; the optional `openai` provider degrades gracefully to "disabled" (logged) if its construction fails
+- Providers behind a shared `BaseProvider` interface — `openai`, `anthropic`, `ollama`, `gemini`, `nvidia_nim`, `openrouter`, `groq`, `mistral`, plus `MockProvider`; SDK exceptions are translated into `ProviderError`, never leaked to the rest of the app
+- `ProviderManager` — the mandatory `mock` provider crashes startup if it fails to construct; optional providers degrade gracefully to "disabled" (logged) if construction fails, with per-provider circuit breakers for failover
+- Live, encrypted provider credential configuration via `/v1/providers/config` — hot-reloadable, no restart required
 - In-process event bus (`PROVIDER_AVAILABLE`, `PROVIDER_DISABLED`, `PROVIDER_FAILED`, `MODEL_REGISTERED`), with per-subscriber exception isolation
 - Structured JSON logging (console + rotating file) with `contextvars`-based request context
-
-Routing, classification, verification, and the dashboard are not built yet
-— see `docs/superpowers/specs/` for the full roadmap.
+- Operations dashboard at `/dashboard` — quality trends, failover events, recent requests, per-model cost, cost-optimization recommendations
 
 ## Setup
 
