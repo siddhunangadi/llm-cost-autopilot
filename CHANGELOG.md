@@ -46,7 +46,7 @@ from `ProviderFactory.registered_names()` (directly, or via
   construction now derive their provider set from
   `ProviderFactory.registered_names()`
 
-**Stats:** 455 tests passing (1 new), 0 regressions.
+**Stats:** 455 tests passing (75 new), 0 regressions.
 
 ## v0.9.0 — Provider Configuration (2026-07-03)
 
