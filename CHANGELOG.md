@@ -5,6 +5,36 @@ correspond to the `vX.Y.0` git tags marking the end of each phase.
 
 ## Unreleased
 
+Adds `benchmarks/run_benchmarks.py` (Phase A: Production Validation, per
+CLAUDE.md's Portfolio Completion criteria -- prove documented performance
+claims with evidence instead of assertion). Reuses the real
+`RoutingEngine`/`ModelRegistry`/`HeuristicComplexityClassifier`/
+`ProviderExecutor`/`CircuitBreaker` against production `models.yaml` and
+`routing.yaml`, with `MockProvider` standing in for every provider (no
+network calls, no real API keys). Four sections, written to
+`benchmarks/report.md`:
+
+- **Routing latency**: 300 iterations, avg 0.06ms / P95 0.12ms vs. the
+  <50ms target -- PASS.
+- **Classifier latency**: 300 iterations, avg 0.002ms / P95 0.003ms vs.
+  the <10ms target -- PASS.
+- **Load test**: 500 requests, 80.1% cost savings vs. the highest-cost
+  model, 93.2% quality parity, full routing distribution. "Quality
+  parity" here is `mean(selected model benchmark_score) /
+  mean(baseline benchmark_score)` -- the static per-model quality rating
+  from `models.yaml` metadata, not a live LLM-judge score or
+  `VerificationService` pass rate (that real measured-output-quality data
+  already exists separately on the dashboard's Quality metrics, just
+  isn't wired into this static load test, which never calls a provider).
+- **Provider failover**: drives a real `CircuitBreaker` through
+  closed -> open -> half-open -> closed against a provider scripted to
+  fail 3 times then recover, with assertions on each transition and the
+  full transition log in the report -- not just "failover exists."
+
+Covered by `backend/tests/test_benchmarks.py`, a fast smoke test at low
+iteration counts so import/signature drift is caught in the normal test
+run without needing a full benchmark pass every time.
+
 Adds the Product Vision, User Journey, and Decision Hierarchy sections to
 `CLAUDE.md` -- shifts the project's framing from "LLM router" to "AI Cost
 Optimization platform" and establishes that features should be prioritized
