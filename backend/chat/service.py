@@ -1,4 +1,6 @@
+import hashlib
 import json
+import time
 import uuid
 
 from fastapi import BackgroundTasks
@@ -42,7 +44,9 @@ class ChatService:
     async def chat(
         self, prompt: str, strategy: str, background_tasks: BackgroundTasks
     ) -> ChatResult:
+        start = time.monotonic()
         request_id = str(uuid.uuid4())
+        prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()
         decision = self._routing_engine.route(prompt, strategy_name=strategy)
 
         with self._session_factory() as session:
@@ -114,6 +118,19 @@ class ChatService:
                 actual_cost=actual_cost,
             ))
             session.commit()
+
+        self._logger.info("chat_request_completed", extra={
+            "request_id": request_id,
+            "prompt_hash": prompt_hash,
+            "complexity": decision.complexity.value,
+            "final_model": spec.id,
+            "provider": spec.provider,
+            "latency_ms": round((time.monotonic() - start) * 1000, 1),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "estimated_cost": actual_cost,
+            "routing_reason": decision.reasoning,
+        })
 
         try:
             background_tasks.add_task(

@@ -143,3 +143,23 @@ def test_get_logger_returns_logger_adapter_with_component_bound():
     logger = get_logger("my_component")
     assert isinstance(logger, logging.LoggerAdapter)
     assert logger.extra["component"] == "my_component"
+
+
+def test_extra_fields_passed_to_logger_call_surface_in_output():
+    """Regression test: JsonFormatter previously only rendered the fixed
+    request-context whitelist, silently dropping any `extra={...}` passed
+    directly to a log call -- e.g. subscribers.py's event payloads."""
+    logger, stream = _capture_logger("test_component")
+    logger.info("event_emitted", extra={"payload": {"score": 0.9, "escalated": False}})
+
+    record = _read_last_record(stream)
+    assert record["payload"] == {"score": 0.9, "escalated": False}
+
+
+def test_extra_field_does_not_override_fixed_schema_fields():
+    logger, stream = _capture_logger("test_component")
+    with request_context(request_id="req-1"):
+        logger.info("hello", extra={"request_id": "should-not-win"})
+
+    record = _read_last_record(stream)
+    assert record["request_id"] == "req-1"

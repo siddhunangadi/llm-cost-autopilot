@@ -232,9 +232,11 @@ def test_failed_reload_does_not_corrupt_existing_cache(tmp_path):
     assert registry.get_model("gpt-4o-mini") is not None
 
 
-def test_new_provider_models_are_registered():
+def test_new_provider_models_are_registered(tmp_path):
     """Test that curated models for new providers are registered in the real models.yaml"""
-    settings = Settings(_env_file=None, openai_api_key="sk-test")
+    settings = Settings(
+        _env_file=None, openai_api_key="sk-test", database_url=f"sqlite:///{tmp_path}/test.db"
+    )
     engine = create_engine_from_settings(settings)
     init_db(engine)
     session_factory = create_session_factory(engine)

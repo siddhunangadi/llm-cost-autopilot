@@ -51,28 +51,36 @@ class RequestRow(Base):
     request_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     prompt: Mapped[str] = mapped_column(String, nullable=False)
     strategy: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
 
 
 class ResponseRow(Base):
     __tablename__ = "responses"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    request_id: Mapped[str] = mapped_column(String, ForeignKey("requests.request_id"), nullable=False)
+    request_id: Mapped[str] = mapped_column(
+        String, ForeignKey("requests.request_id"), nullable=False, index=True
+    )
     response_text: Mapped[str | None] = mapped_column(String, nullable=True)
     actual_input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     actual_output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     actual_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
     error: Mapped[str | None] = mapped_column(String, nullable=True)
     error_type: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
 
 
 class RoutingEventRow(Base):
     __tablename__ = "routing_events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    request_id: Mapped[str] = mapped_column(String, ForeignKey("requests.request_id"), nullable=False)
+    request_id: Mapped[str] = mapped_column(
+        String, ForeignKey("requests.request_id"), nullable=False, index=True
+    )
     complexity: Mapped[str] = mapped_column(String, nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     selected_model: Mapped[str] = mapped_column(String, nullable=False)
@@ -80,15 +88,19 @@ class RoutingEventRow(Base):
     estimated_cost: Mapped[float] = mapped_column(Float, nullable=False)
     estimated_latency_ms: Mapped[float] = mapped_column(Float, nullable=False)
     reasoning: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
 
 
 class VerificationRow(Base):
     __tablename__ = "verifications"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    request_id: Mapped[str] = mapped_column(String, ForeignKey("requests.request_id"), nullable=False)
-    status: Mapped[str] = mapped_column(String, nullable=False)
+    request_id: Mapped[str] = mapped_column(
+        String, ForeignKey("requests.request_id"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String, nullable=False, index=True)
 
     routing_model: Mapped[str] = mapped_column(String, nullable=False)
     routing_strategy: Mapped[str] = mapped_column(String, nullable=False)
@@ -96,6 +108,11 @@ class VerificationRow(Base):
 
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
     passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    escalated: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    escalated_model: Mapped[str | None] = mapped_column(String, nullable=True)
+    escalation_cost_delta: Mapped[float | None] = mapped_column(Float, nullable=True)
+    escalation_latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    quality_gap: Mapped[float | None] = mapped_column(Float, nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     rationale: Mapped[str | None] = mapped_column(String, nullable=True)
     dimensions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -108,7 +125,9 @@ class VerificationRow(Base):
     error_type: Mapped[str | None] = mapped_column(String, nullable=True)
     error: Mapped[str | None] = mapped_column(String, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -149,7 +168,9 @@ class RecommendationRow(Base):
     status: Mapped[str] = mapped_column(String, nullable=False, default="new")
     source: Mapped[str] = mapped_column(String, nullable=False)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )

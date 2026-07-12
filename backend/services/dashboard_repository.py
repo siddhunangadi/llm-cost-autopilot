@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
+from sqlalchemy import Integer, func
 from sqlalchemy.orm import sessionmaker
 
 from backend.database.models import (
@@ -96,58 +97,80 @@ def _avg(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
-def _group_avg(rows: list[VerificationRow], key: str) -> dict[str, float]:
-    grouped: dict[str, list[float]] = {}
-    for row in rows:
-        grouped.setdefault(getattr(row, key), []).append(row.score)
-    return {name: _avg(scores) for name, scores in grouped.items()}
-
-
 class DashboardRepository:
     def __init__(self, session_factory: sessionmaker) -> None:
         self._session_factory = session_factory
 
-    def get_quality_aggregation(self) -> QualityAggregation:
+    def get_quality_aggregation(self, window: TimeWindow | None = None) -> QualityAggregation:
         with self._session_factory() as session:
-            completed = (
-                session.query(VerificationRow)
-                .filter_by(status=VerificationStatus.COMPLETED.value)
-                .all()
+            completed_query = session.query(VerificationRow).filter_by(
+                status=VerificationStatus.COMPLETED.value
             )
-            failure_count = (
-                session.query(VerificationRow)
-                .filter_by(status=VerificationStatus.FAILED.value)
-                .count()
+            failed_query = session.query(VerificationRow).filter_by(
+                status=VerificationStatus.FAILED.value
+            )
+            if window is not None:
+                completed_query = completed_query.filter(VerificationRow.created_at >= window.cutoff)
+                failed_query = failed_query.filter(VerificationRow.created_at >= window.cutoff)
+
+            total_verified, avg_score, avg_confidence, passed_count, avg_eval_ms = (
+                completed_query.with_entities(
+                    func.count(VerificationRow.id),
+                    func.avg(VerificationRow.score),
+                    func.avg(VerificationRow.confidence),
+                    func.sum(func.cast(VerificationRow.passed, Integer)),
+                    func.avg(VerificationRow.evaluation_duration_ms),
+                ).one()
+            )
+            failure_count = failed_query.count()
+
+            by_model = dict(
+                completed_query.with_entities(
+                    VerificationRow.routing_model, func.avg(VerificationRow.score)
+                ).group_by(VerificationRow.routing_model).all()
+            )
+            by_strategy = dict(
+                completed_query.with_entities(
+                    VerificationRow.routing_strategy, func.avg(VerificationRow.score)
+                ).group_by(VerificationRow.routing_strategy).all()
+            )
+            by_complexity = dict(
+                completed_query.with_entities(
+                    VerificationRow.routing_complexity, func.avg(VerificationRow.score)
+                ).group_by(VerificationRow.routing_complexity).all()
             )
 
+            # Queue delay and total verification time are timestamp differences,
+            # not portable across SQL dialects (sqlite vs postgres) -- computed
+            # in Python, but only the 3 timestamp columns are fetched, not the
+            # full row (skips dimensions/rationale/raw_judge_response, etc).
+            timing_rows = completed_query.with_entities(
+                VerificationRow.created_at, VerificationRow.started_at, VerificationRow.completed_at,
+            ).all()
+
         queue_delays = [
-            (row.started_at - row.created_at).total_seconds() * 1000
-            for row in completed
-            if row.started_at is not None
+            (started - created).total_seconds() * 1000
+            for created, started, _ in timing_rows
+            if started is not None
         ]
         total_durations = [
-            (row.completed_at - row.started_at).total_seconds() * 1000
-            for row in completed
-            if row.started_at is not None and row.completed_at is not None
-        ]
-        eval_durations = [
-            row.evaluation_duration_ms for row in completed if row.evaluation_duration_ms is not None
+            (completed - started).total_seconds() * 1000
+            for _, started, completed in timing_rows
+            if started is not None and completed is not None
         ]
 
         return QualityAggregation(
-            total_verified=len(completed),
-            average_score=_avg([row.score for row in completed]),
-            average_confidence=_avg(
-                [row.confidence for row in completed if row.confidence is not None]
-            ),
-            pass_rate=_avg([1.0 if row.passed else 0.0 for row in completed]),
+            total_verified=total_verified,
+            average_score=avg_score or 0.0,
+            average_confidence=avg_confidence or 0.0,
+            pass_rate=(passed_count or 0) / total_verified if total_verified else 0.0,
             average_queue_delay_ms=_avg(queue_delays),
-            average_evaluation_duration_ms=_avg(eval_durations),
+            average_evaluation_duration_ms=avg_eval_ms or 0.0,
             average_total_verification_ms=_avg(total_durations),
             verification_failure_count=failure_count,
-            by_model=_group_avg(completed, "routing_model"),
-            by_strategy=_group_avg(completed, "routing_strategy"),
-            by_complexity=_group_avg(completed, "routing_complexity"),
+            by_model=by_model,
+            by_strategy=by_strategy,
+            by_complexity=by_complexity,
         )
 
     def get_cost_trend(self, window: TimeWindow) -> list[CostBucketData]:

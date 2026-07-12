@@ -1,3 +1,4 @@
 judge_model_id: gpt-4o
 pass_threshold: 0.7
 judge_prompt_version: v1
+escalation_model_id: gpt-4o

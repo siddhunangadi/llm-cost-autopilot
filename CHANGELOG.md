@@ -3,6 +3,106 @@
 All notable changes to this project are documented here. Versions
 correspond to the `vX.Y.0` git tags marking the end of each phase.
 
+## Unreleased
+
+Adds automatic escalation: `VerificationService.verify` now marks
+`VerificationRow.escalated` and emits `EventType.ESCALATION_TRIGGERED` whenever
+a verdict falls below `pass_threshold`. This closes a gap where the CLAUDE.md
+"Automatic escalation" objective and Verification Rules ("trigger escalation")
+had zero implementation anywhere in `backend/` (confirmed via a full-repo
+search for "escalat"). Escalated verifications feed the existing learning
+pipeline unchanged — no changes to `backend/learning` were needed since it
+already keys off `VerificationRow.passed`.
+
+Extends escalation to a full audit-and-learning workflow, not just an event:
+on a failed verdict, `VerificationService` automatically re-runs the same
+prompt against a configured higher-tier model (`escalation_model_id` in
+`verification.yaml`, reusing `ProviderExecutor.generate` and
+`ModelRegistry.estimate_cost` -- no duplicated retry/circuit-breaker/pricing
+logic) and records `escalated_model`, `escalation_cost_delta`,
+`escalation_latency_ms`, and `quality_gap` (`pass_threshold - score`) on
+`VerificationRow`, plus the same fields on `ESCALATION_TRIGGERED`. The
+original user-facing response is never replaced -- verification (and
+therefore escalation) runs after the response has already been returned,
+per the existing "user latency must not increase because of verification"
+rule -- so this is an audit/learning-pipeline signal, not response
+replacement. Regeneration failures (model missing, provider down) are
+caught and never propagate; `quality_gap` and the event are still recorded.
+
+Fixes a structured-logging defect found during a field-by-field audit
+against CLAUDE.md's Logging requirements: `logging.LoggerAdapter`'s default
+`process()` silently replaced any caller-supplied `extra={...}` with the
+adapter's own `{"component": ...}` dict, so `subscribers.py`'s event
+payloads (verification score, escalation cost delta, provider failover
+reason, etc.) never reached the logs -- confirmed live via a Docker
+container's `event_emitted` lines showing `provider: null` during real
+request handling. `get_logger()` now returns a `_MergingLoggerAdapter` that
+merges instead of overwrites, and `JsonFormatter` now surfaces any extra
+fields a caller passes rather than silently dropping them.
+
+Also closes the remaining Logging-section gap: `complexity`, `final_model`,
+`routing_reason`, token counts, `estimated_cost`, and request latency were
+persisted to the database but never logged. `ChatService.chat` now emits one
+`chat_request_completed` log line per request carrying all of them, plus a
+SHA-256 `prompt_hash` -- never the raw prompt, per the "never log raw
+prompts" rule.
+
+Fixes a dashboard correctness bug found during a data-source audit:
+`DashboardRepository.get_quality_aggregation` was the only aggregation
+method with no `TimeWindow` filter -- every sibling method
+(`get_cost_trend`, `get_quality_trend`, `get_failover_summary`,
+`get_failover_events`, `get_cost_by_model`) already had one, confirmed by
+each having an "excludes data outside window" test that this method
+lacked. Since `DashboardService.get_overview`/`get_overview_fragment` call
+it alongside the windowed cost/failover queries, the dashboard's "This
+Week" selector silently showed all-time quality numbers next to windowed
+cost numbers on the same page. `get_quality_aggregation` now accepts an
+optional `window` and filters by `VerificationRow.created_at`;
+`/v1/metrics/quality` (which has no date param) keeps its existing
+all-time behavior by passing no window.
+
+Adds Docker support: a `Dockerfile` (multi-stage `uv sync --frozen --no-dev`,
+runs via `uv run --no-sync` so the container never re-resolves dev
+dependencies at startup) and a matching `.dockerignore`. Verified end-to-end
+with `docker build` + `docker run` against `/v1/health`. Also fixes
+`test_new_provider_models_are_registered`, which was missing the `tmp_path`
+database isolation used by every other test in the file and so could hit
+the real dev-mode `llm_cost_autopilot.db` on disk.
+
+Performance: `LearningService.refresh_recommendations` fetched the entire
+`ResponseRow` table on every call to build a `request_id -> cost` lookup,
+even though only rows matching the `VerificationRow`s already fetched were
+ever used. Now filters `ResponseRow` by `request_id.in_(...)`, so cost is
+bounded by verification volume, not total response history.
+
+Performance: `DashboardRepository.get_quality_aggregation` fetched every
+completed `VerificationRow` as full ORM objects (including `dimensions`,
+`rationale`, `raw_judge_response` -- unbounded text/JSON blobs never used
+in this aggregation) to average `score`/`confidence`/`passed` and group by
+`routing_model`/`routing_strategy`/`routing_complexity` in Python.
+`total_verified`, `average_score`, `average_confidence`, `pass_rate`,
+`average_evaluation_duration_ms`, and the three `by_*` breakdowns are now
+computed with SQL `COUNT`/`AVG`/`GROUP BY`. Only `average_queue_delay_ms`
+and `average_total_verification_ms` still run in Python (they're
+timestamp subtraction, not portable across sqlite/postgres dialects), but
+now fetch only the 3 needed timestamp columns instead of full rows.
+Behavior-preserving: covered by the existing
+`test_get_quality_aggregation_matches_verification_data` plus a new
+`test_get_quality_aggregation_computes_confidence_pass_rate_and_duration_via_sql`
+regression test.
+
+Performance: adds DB indexes on columns filtered or joined on in every
+dashboard/learning query but never indexed before: `request_id` on
+`responses`, `routing_events`, and `verifications` (all joined via
+`.in_(request_ids)` in `DashboardRepository`), `status` on `verifications`
+(filtered on every `get_quality_aggregation` call), and `created_at` on
+`requests`, `responses`, `routing_events`, `verifications`, and
+`learning_recommendations` (every dashboard query filters by
+`TimeWindow.cutoff` on this column). No migration tool exists yet
+(`init_db` is `Base.metadata.create_all`), so these take effect on any
+freshly created database; an existing on-disk SQLite file would need
+`CREATE INDEX` run manually or the file recreated.
+
 ## v0.9.1 — Provider Expansion (2026-07-04)
 
 Adds five new LLM providers -- Google Gemini, NVIDIA NIM, OpenRouter, Groq,

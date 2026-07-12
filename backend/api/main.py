@@ -164,18 +164,24 @@ async def lifespan(app: FastAPI):
         get_logger("verification").exception("judge_provider_unavailable_at_startup")
         judge = _UnavailableJudge(reason=str(exc))
     judge_engine = JudgeEngine(judge=judge, judge_model_id=verification_config.judge_model_id)
-    verification_service = VerificationService(
-        judge_engine=judge_engine,
-        session_factory=session_factory,
-        event_bus=event_bus,
-        judge_prompt_version=verification_config.judge_prompt_version,
-    )
 
     provider_executor = ProviderExecutor(
         provider_manager=provider_manager,
         retry_policy=ExponentialBackoffRetryPolicy(),
         circuit_breakers={name: CircuitBreaker() for name in provider_factory.registered_names()},
         event_bus=event_bus,
+    )
+
+    verification_service = VerificationService(
+        judge_engine=judge_engine,
+        session_factory=session_factory,
+        event_bus=event_bus,
+        judge_prompt_version=verification_config.judge_prompt_version,
+        pass_threshold=verification_config.pass_threshold,
+        escalation_model_id=verification_config.escalation_model_id,
+        provider_executor=provider_executor,
+        provider_manager=provider_manager,
+        model_registry=model_registry,
     )
 
     chat_service = ChatService(

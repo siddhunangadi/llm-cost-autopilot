@@ -113,6 +113,9 @@ def _make_chat_service(tmp_path, verification_service=None):
         verification_service = VerificationService(
             judge_engine=judge_engine, session_factory=session_factory,
             event_bus=EventBus(), judge_prompt_version="v1",
+            pass_threshold=0.7, escalation_model_id="mock-model",
+            provider_executor=provider_executor, provider_manager=provider_manager,
+            model_registry=model_registry,
         )
 
     chat_service = ChatService(
@@ -148,6 +151,32 @@ async def test_chat_returns_result_and_persists_rows(tmp_path):
     assert response_row.error is None
     assert routing_event_row.selected_model == "mock-model"
     assert json.loads(routing_event_row.reasoning) == result.routing.reasoning
+
+
+async def test_chat_logs_structured_summary_with_required_fields(tmp_path, caplog):
+    import hashlib
+    import logging
+
+    chat_service, _ = _make_chat_service(tmp_path)
+
+    with caplog.at_level(logging.INFO, logger="chat"):
+        result = await chat_service.chat(
+            "List three fruits.", strategy="balanced", background_tasks=BackgroundTasks()
+        )
+
+    summary = next(r for r in caplog.records if r.message == "chat_request_completed")
+    assert summary.request_id == result.request_id
+    assert summary.prompt_hash == hashlib.sha256(b"List three fruits.").hexdigest()
+    assert summary.complexity == result.routing.complexity.value
+    assert summary.final_model == "mock-model"
+    assert summary.provider == "mock"
+    assert summary.latency_ms >= 0
+    assert summary.input_tokens > 0
+    assert summary.output_tokens > 0
+    assert summary.estimated_cost >= 0
+    assert summary.routing_reason == result.routing.reasoning
+    # Raw prompt text must never be logged, only its hash.
+    assert not any("List three fruits." in str(v) for v in vars(summary).values())
 
 
 async def test_chat_persists_no_eligible_model_error_when_primary_fails_and_no_failover_candidate(
@@ -324,6 +353,9 @@ def _make_failover_chat_service(tmp_path):
     verification_service = VerificationService(
         judge_engine=JudgeEngine(judge=judge, judge_model_id="mock"),
         session_factory=session_factory, event_bus=EventBus(), judge_prompt_version="v1",
+        pass_threshold=0.7, escalation_model_id="primary-model",
+        provider_executor=provider_executor, provider_manager=provider_manager,
+        model_registry=model_registry,
     )
 
     chat_service = ChatService(

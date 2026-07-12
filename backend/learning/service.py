@@ -31,11 +31,14 @@ class LearningService:
     def refresh_recommendations(self) -> list[RecommendationRow]:
         with self._session_factory() as session:
             rows = session.query(VerificationRow).order_by(VerificationRow.id).all()
+            request_ids = [r.request_id for r in rows]
             cost_by_request_id = {
                 r.request_id: r.actual_cost
-                for r in session.query(ResponseRow).all()
-                if r.actual_cost is not None
-            }
+                for r in session.query(ResponseRow).filter(
+                    ResponseRow.request_id.in_(request_ids),
+                    ResponseRow.actual_cost.isnot(None),
+                ).all()
+            } if request_ids else {}
 
         findings = self._detector.detect(rows)
         cost_metrics = build_model_cost_metrics(

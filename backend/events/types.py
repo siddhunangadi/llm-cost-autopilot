@@ -13,3 +13,4 @@ class EventType(str, Enum):
     CIRCUIT_HALF_OPEN = "circuit_half_open"
     CIRCUIT_CLOSED = "circuit_closed"
     PROVIDER_FAILOVER_TRIGGERED = "provider_failover_triggered"
+    ESCALATION_TRIGGERED = "escalation_triggered"

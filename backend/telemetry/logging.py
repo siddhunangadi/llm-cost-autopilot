@@ -51,6 +51,11 @@ def get_request_context() -> dict:
     return dict(_request_context.get())
 
 
+_RESERVED_LOG_RECORD_ATTRS = frozenset(logging.LogRecord(
+    "", 0, "", 0, "", (), None
+).__dict__) | {"message", "asctime", "component"}
+
+
 class JsonFormatter(logging.Formatter):
     def __init__(self, service: str, environment: str) -> None:
         super().__init__()
@@ -71,7 +76,14 @@ class JsonFormatter(logging.Formatter):
         }
         for field in _REQUEST_CONTEXT_FIELDS:
             payload[field] = context.get(field)
-        return json.dumps(payload)
+        # Surface any caller-supplied `extra={...}` fields (e.g. event
+        # payloads logged by subscribers.py) that aren't already part of
+        # the fixed request-context schema above -- without this they are
+        # silently dropped by the formatter.
+        for key, value in record.__dict__.items():
+            if key not in _RESERVED_LOG_RECORD_ATTRS and key not in payload:
+                payload[key] = value
+        return json.dumps(payload, default=str)
 
 
 def configure_logging(settings: Settings, log_dir: str = "logs") -> None:
@@ -93,9 +105,21 @@ def configure_logging(settings: Settings, log_dir: str = "logs") -> None:
     root.addHandler(file_handler)
 
 
+class _MergingLoggerAdapter(logging.LoggerAdapter):
+    """LoggerAdapter's default process() replaces kwargs['extra'] with
+    self.extra entirely, silently dropping any extra= a caller passes to
+    the log call. Merge them instead so both the adapter-bound `component`
+    and caller-supplied fields (e.g. subscribers.py's event payloads)
+    reach the formatter."""
+
+    def process(self, msg, kwargs):
+        kwargs["extra"] = {**self.extra, **kwargs.get("extra", {})}
+        return msg, kwargs
+
+
 def get_logger(component: str) -> logging.LoggerAdapter:
     """Centralized logger accessor. Application code must always go
     through this instead of calling logging.getLogger() directly, so
     every log line consistently carries `component` and merges the
     request-scoped context fields via JsonFormatter."""
-    return logging.LoggerAdapter(logging.getLogger(component), {"component": component})
+    return _MergingLoggerAdapter(logging.getLogger(component), {"component": component})

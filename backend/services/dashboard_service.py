@@ -91,7 +91,7 @@ class DashboardService:
         ) = await asyncio.gather(
             asyncio.to_thread(self._provider_manager.list_providers),
             asyncio.to_thread(self._provider_executor.circuit_states),
-            asyncio.to_thread(self._dashboard_repository.get_quality_aggregation),
+            asyncio.to_thread(self._dashboard_repository.get_quality_aggregation, window),
             asyncio.to_thread(self._dashboard_repository.get_cost_trend, window),
             asyncio.to_thread(self._dashboard_repository.get_failover_summary, window),
             asyncio.to_thread(self._learning_service.get_recommendations),
@@ -131,7 +131,7 @@ class DashboardService:
         availability, circuits, quality_agg, cost_buckets, failover_today = await asyncio.gather(
             asyncio.to_thread(self._provider_manager.list_providers),
             asyncio.to_thread(self._provider_executor.circuit_states),
-            asyncio.to_thread(self._dashboard_repository.get_quality_aggregation),
+            asyncio.to_thread(self._dashboard_repository.get_quality_aggregation, window),
             asyncio.to_thread(self._dashboard_repository.get_cost_trend, window),
             asyncio.to_thread(self._dashboard_repository.get_failover_summary, TimeWindow(days=1)),
         )

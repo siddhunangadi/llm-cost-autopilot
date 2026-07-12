@@ -57,7 +57,7 @@ class _FakeDashboardRepository:
         self.get_recent_requests_calls = 0
         self.get_cost_by_model_calls = 0
 
-    def get_quality_aggregation(self):
+    def get_quality_aggregation(self, window=None):
         self.get_quality_aggregation_calls += 1
         return self._quality
 

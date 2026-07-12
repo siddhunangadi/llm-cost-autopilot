@@ -61,6 +61,94 @@ def test_get_quality_aggregation_matches_verification_data(tmp_path):
     assert result.by_model["gpt-4o-mini"] == pytest.approx(0.9)
 
 
+def test_get_quality_aggregation_computes_confidence_pass_rate_and_duration_via_sql(tmp_path):
+    """Regression test for the SQL-aggregate rewrite of get_quality_aggregation:
+    proves average_confidence, average_evaluation_duration_ms, mixed
+    pass/fail pass_rate, and multi-group by_strategy/by_complexity breakdowns
+    still match hand-computed values."""
+    repository, session_factory = _make_repository(tmp_path)
+    with session_factory() as session:
+        for i, (score, passed, confidence, eval_ms, strategy, complexity) in enumerate([
+            (0.9, True, 0.8, 100, "balanced", "simple"),
+            (0.3, False, 0.4, 200, "cheap", "complex"),
+            (0.6, True, None, 300, "balanced", "complex"),
+        ]):
+            request_id = f"req-{i}"
+            session.add(RequestRow(request_id=request_id, prompt="hi", strategy=strategy))
+            session.add(VerificationRow(
+                request_id=request_id, status=VerificationStatus.COMPLETED.value,
+                routing_model="gpt-4o-mini", routing_strategy=strategy, routing_complexity=complexity,
+                score=score, passed=passed, confidence=confidence, evaluation_duration_ms=eval_ms,
+            ))
+        session.commit()
+
+    result = repository.get_quality_aggregation()
+
+    assert result.total_verified == 3
+    assert result.pass_rate == pytest.approx(2 / 3)
+    assert result.average_confidence == pytest.approx((0.8 + 0.4) / 2)
+    assert result.average_evaluation_duration_ms == pytest.approx((100 + 200 + 300) / 3)
+    assert result.average_score == pytest.approx((0.9 + 0.3 + 0.6) / 3)
+    assert result.by_strategy["balanced"] == pytest.approx((0.9 + 0.6) / 2)
+    assert result.by_strategy["cheap"] == pytest.approx(0.3)
+    assert result.by_complexity["complex"] == pytest.approx((0.3 + 0.6) / 2)
+
+
+def test_get_quality_aggregation_excludes_data_outside_window(tmp_path):
+    """Regression test: get_quality_aggregation ignored the window entirely
+    (unlike every other dashboard aggregation), so the same 'This Week'
+    selector on the dashboard silently showed all-time quality numbers
+    next to windowed cost/failover numbers."""
+    repository, session_factory = _make_repository(tmp_path)
+    old = datetime.now(timezone.utc) - timedelta(days=30)
+    recent = datetime.now(timezone.utc)
+    with session_factory() as session:
+        session.add(RequestRow(request_id="req-old", prompt="hi", strategy="balanced"))
+        session.add(VerificationRow(
+            request_id="req-old", status=VerificationStatus.COMPLETED.value,
+            routing_model="gpt-4o-mini", routing_strategy="balanced", routing_complexity="simple",
+            score=0.1, passed=False, created_at=old,
+        ))
+        session.add(RequestRow(request_id="req-old-2", prompt="hi", strategy="balanced"))
+        session.add(VerificationRow(
+            request_id="req-old-2", status=VerificationStatus.FAILED.value,
+            routing_model="gpt-4o-mini", routing_strategy="balanced", routing_complexity="simple",
+            error_type="ValidationError", error="bad json", created_at=old,
+        ))
+        session.add(RequestRow(request_id="req-new", prompt="hi", strategy="balanced"))
+        session.add(VerificationRow(
+            request_id="req-new", status=VerificationStatus.COMPLETED.value,
+            routing_model="gpt-4o-mini", routing_strategy="balanced", routing_complexity="simple",
+            score=0.9, passed=True, created_at=recent,
+        ))
+        session.commit()
+
+    result = repository.get_quality_aggregation(TimeWindow(days=7))
+
+    assert result.total_verified == 1
+    assert result.verification_failure_count == 0
+    assert result.average_score == pytest.approx(0.9)
+
+
+def test_get_quality_aggregation_without_window_stays_all_time(tmp_path):
+    """metrics.py's /v1/metrics/quality has no date param and must keep
+    its existing all-time behavior when no window is passed."""
+    repository, session_factory = _make_repository(tmp_path)
+    old = datetime.now(timezone.utc) - timedelta(days=30)
+    with session_factory() as session:
+        session.add(RequestRow(request_id="req-old", prompt="hi", strategy="balanced"))
+        session.add(VerificationRow(
+            request_id="req-old", status=VerificationStatus.COMPLETED.value,
+            routing_model="gpt-4o-mini", routing_strategy="balanced", routing_complexity="simple",
+            score=0.5, passed=True, created_at=old,
+        ))
+        session.commit()
+
+    result = repository.get_quality_aggregation()
+
+    assert result.total_verified == 1
+
+
 def test_get_cost_trend_buckets_by_day_and_omits_empty_days(tmp_path):
     repository, session_factory = _make_repository(tmp_path)
     now = datetime.now(timezone.utc)

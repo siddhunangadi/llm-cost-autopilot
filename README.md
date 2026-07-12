@@ -157,6 +157,13 @@ black box.
 uv run pytest
 ```
 
+## Run with Docker
+
+```bash
+docker build -t llm-cost-autopilot .
+docker run -p 8000:8000 -e OPENAI_API_KEY=sk-... llm-cost-autopilot
+```
+
 ## License
 
 MIT — use it, fork it, ship it.

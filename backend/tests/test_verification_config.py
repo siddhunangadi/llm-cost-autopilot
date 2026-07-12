@@ -11,6 +11,7 @@ VALID_YAML = textwrap.dedent("""
     judge_model_id: gpt-4o
     pass_threshold: 0.7
     judge_prompt_version: v1
+    escalation_model_id: gpt-4o
 """)
 
 
@@ -24,6 +25,7 @@ def test_load_valid_verification_config(tmp_path):
     assert config.judge_model_id == "gpt-4o"
     assert config.pass_threshold == 0.7
     assert config.judge_prompt_version == "v1"
+    assert config.escalation_model_id == "gpt-4o"
 
 
 def test_load_raises_on_malformed_yaml(tmp_path):
@@ -47,3 +49,4 @@ def test_real_verification_yaml_loads_successfully():
     assert config.judge_model_id == "gpt-4o"
     assert config.pass_threshold == 0.7
     assert config.judge_prompt_version == "v1"
+    assert config.escalation_model_id == "gpt-4o"
