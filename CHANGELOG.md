@@ -5,6 +5,23 @@ correspond to the `vX.Y.0` git tags marking the end of each phase.
 
 ## Unreleased
 
+Adds the "Savings vs Baseline" headline KPI (Loop 3, Phase A: the product's
+core value proposition -- "how much is this actually saving me?" -- surfaced
+before routing-decision explainability or waste insights, per the reasoning
+that trust in the product's value has to land before trust in its mechanics).
+`DashboardService._compute_savings` picks a baseline model (configurable via
+`COST_BASELINE_MODEL_ID`; defaults to the highest combined
+input+output-cost model in the registry when unset) and computes what this
+window's actual traffic would have cost entirely on that one model, using
+each response's real token counts (`DashboardRepository.get_token_totals`,
+reusing `ModelRegistry.estimate_cost` -- no duplicated pricing math).
+Exposed as `DashboardOverview.savings` and new
+`total_cost`/`savings_amount`/`savings_percent`/`baseline_model_id` keys on
+`get_overview_fragment()`, and rendered as the first thing on the dashboard
+(`overview.html` fragment) when a baseline model exists. Covered by 3 new
+tests verifying the default-baseline selection, an explicitly configured
+baseline, and the zero-models edge case.
+
 Adds automatic escalation: `VerificationService.verify` now marks
 `VerificationRow.escalated` and emits `EventType.ESCALATION_TRIGGERED` whenever
 a verdict falls below `pass_threshold`. This closes a gap where the CLAUDE.md

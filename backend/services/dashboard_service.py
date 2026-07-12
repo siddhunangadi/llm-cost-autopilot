@@ -10,6 +10,7 @@ from backend.learning.service import LearningService
 from backend.providers.executor import ProviderExecutor
 from backend.providers.manager import ProviderManager
 from backend.services.dashboard_repository import DashboardRepository, TimeWindow
+from backend.services.model_registry import ModelRegistry
 
 
 class ProviderDashboardStatus(BaseModel):
@@ -28,6 +29,14 @@ class CostBucket(BaseModel):
 class FailoverSummary(BaseModel):
     total_failovers: int
     request_ids: list[str]
+
+
+class SavingsSummary(BaseModel):
+    baseline_model_id: str | None
+    actual_cost: float
+    baseline_cost: float
+    savings_amount: float
+    savings_percent: float
 
 
 class QualityMetrics(BaseModel):
@@ -65,6 +74,7 @@ class DashboardOverview(BaseModel):
     cost_trend: list[CostBucket]
     failovers: FailoverSummary
     recommendations: list[RecommendationResponse]
+    savings: SavingsSummary
 
 
 class DashboardService:
@@ -74,11 +84,45 @@ class DashboardService:
         provider_executor: ProviderExecutor,
         learning_service: LearningService,
         dashboard_repository: DashboardRepository,
+        model_registry: ModelRegistry,
+        baseline_model_id: str | None = None,
     ) -> None:
         self._provider_manager = provider_manager
         self._provider_executor = provider_executor
         self._learning_service = learning_service
         self._dashboard_repository = dashboard_repository
+        self._model_registry = model_registry
+        self._baseline_model_id = baseline_model_id
+
+    def _resolve_baseline_model_id(self) -> str | None:
+        if self._baseline_model_id is not None:
+            return self._baseline_model_id
+        models = self._model_registry.get_models()
+        if not models:
+            return None
+        return max(models, key=lambda m: m.input_cost + m.output_cost).id
+
+    def _compute_savings(self, actual_cost: float, window: TimeWindow) -> SavingsSummary:
+        baseline_model_id = self._resolve_baseline_model_id()
+        if baseline_model_id is None:
+            return SavingsSummary(
+                baseline_model_id=None, actual_cost=actual_cost,
+                baseline_cost=actual_cost, savings_amount=0.0, savings_percent=0.0,
+            )
+        token_totals = self._dashboard_repository.get_token_totals(window)
+        baseline_cost = sum(
+            self._model_registry.estimate_cost(
+                baseline_model_id, t.input_tokens, t.output_tokens
+            )
+            for t in token_totals
+        )
+        savings_amount = baseline_cost - actual_cost
+        savings_percent = savings_amount / baseline_cost if baseline_cost else 0.0
+        return SavingsSummary(
+            baseline_model_id=baseline_model_id, actual_cost=actual_cost,
+            baseline_cost=baseline_cost, savings_amount=savings_amount,
+            savings_percent=savings_percent,
+        )
 
     async def get_overview(self, window: TimeWindow) -> DashboardOverview:
         (
@@ -96,6 +140,8 @@ class DashboardService:
             asyncio.to_thread(self._dashboard_repository.get_failover_summary, window),
             asyncio.to_thread(self._learning_service.get_recommendations),
         )
+        actual_cost = sum(b.total_cost for b in cost_buckets)
+        savings = await asyncio.to_thread(self._compute_savings, actual_cost, window)
 
         return DashboardOverview(
             generated_at=datetime.now(timezone.utc),
@@ -125,6 +171,7 @@ class DashboardService:
                 request_ids=failover_data.request_ids,
             ),
             recommendations=[self._to_recommendation_response(r) for r in recommendation_rows],
+            savings=savings,
         )
 
     async def get_overview_fragment(self, window: TimeWindow) -> dict:
@@ -135,14 +182,19 @@ class DashboardService:
             asyncio.to_thread(self._dashboard_repository.get_cost_trend, window),
             asyncio.to_thread(self._dashboard_repository.get_failover_summary, TimeWindow(days=1)),
         )
+        actual_cost = sum(b.total_cost for b in cost_buckets)
+        savings = await asyncio.to_thread(self._compute_savings, actual_cost, window)
         return {
             "total_requests": sum(b.request_count for b in cost_buckets),
-            "total_cost": sum(b.total_cost for b in cost_buckets),
+            "total_cost": actual_cost,
             "average_quality_score": quality_agg.average_score,
             "pass_rate": quality_agg.pass_rate,
             "active_providers": sum(1 for status in availability.values() if status == "available"),
             "open_circuits": sum(1 for c in circuits.values() if c.get("state") == "open"),
             "failovers_today": len(failover_today.request_ids),
+            "savings_amount": savings.savings_amount,
+            "savings_percent": savings.savings_percent,
+            "baseline_model_id": savings.baseline_model_id,
         }
 
     async def get_provider_fragment(self) -> dict:

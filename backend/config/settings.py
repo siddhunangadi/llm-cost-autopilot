@@ -26,3 +26,4 @@ class Settings(BaseSettings):
     mistral_api_key: str | None = None
     provider_credential_encryption_key: str | None = None
     admin_api_key: str | None = None
+    cost_baseline_model_id: str | None = None

@@ -42,6 +42,12 @@ class CostBucketData:
 
 
 @dataclass(frozen=True)
+class TokenTotals:
+    input_tokens: int
+    output_tokens: int
+
+
+@dataclass(frozen=True)
 class RecentRequestRow:
     request_id: str
     model: str
@@ -172,6 +178,26 @@ class DashboardRepository:
             by_strategy=by_strategy,
             by_complexity=by_complexity,
         )
+
+    def get_token_totals(self, window: TimeWindow) -> list[TokenTotals]:
+        """Per-response token counts for successful (costed) responses in
+        the window -- used to compute a counterfactual baseline cost
+        (what a single reference model would have cost for this traffic).
+        Only 2 columns fetched, not full ResponseRow."""
+        with self._session_factory() as session:
+            rows = (
+                session.query(ResponseRow)
+                .filter(ResponseRow.created_at >= window.cutoff)
+                .filter(ResponseRow.actual_cost.isnot(None))
+                .with_entities(
+                    ResponseRow.actual_input_tokens, ResponseRow.actual_output_tokens,
+                )
+                .all()
+            )
+        return [
+            TokenTotals(input_tokens=i or 0, output_tokens=o or 0)
+            for i, o in rows
+        ]
 
     def get_cost_trend(self, window: TimeWindow) -> list[CostBucketData]:
         with self._session_factory() as session:

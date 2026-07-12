@@ -213,6 +213,8 @@ async def lifespan(app: FastAPI):
         provider_executor=provider_executor,
         learning_service=learning_service,
         dashboard_repository=dashboard_repository,
+        model_registry=model_registry,
+        baseline_model_id=settings.cost_baseline_model_id,
     )
     analytics_service = AnalyticsService(dashboard_repository=dashboard_repository)
 

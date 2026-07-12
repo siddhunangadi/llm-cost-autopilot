@@ -4,6 +4,14 @@
 <section class="dashboard-section" id="section-overview"
   hx-get="/dashboard/fragments/overview" hx-trigger="every 15s" hx-swap="outerHTML">
   <h2>System Overview</h2>
+  {% if overview.baseline_model_id %}
+  <div class="stat-row savings-row">
+    <div class="stat savings">
+      <div class="value">${{ "%.2f"|format(overview.savings_amount) }}</div>
+      <div class="label">Saved vs {{ overview.baseline_model_id }} ({{ "%.0f"|format(overview.savings_percent * 100) }}%)</div>
+    </div>
+  </div>
+  {% endif %}
   <div class="stat-row">
     <div class="stat"><div class="value">{{ overview.total_requests }}</div><div class="label">Total Requests</div></div>
     <div class="stat"><div class="value">${{ "%.2f"|format(overview.total_cost) }}</div><div class="label">Total Cost</div></div>

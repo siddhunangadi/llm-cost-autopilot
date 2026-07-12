@@ -29,6 +29,43 @@ class _FakeProviderExecutor:
         }
 
 
+class _FakeModelRegistry:
+    """No models registered by default -- _compute_savings then resolves
+    baseline_model_id to None and savings collapses to zero, matching the
+    pre-existing behavior these tests assert on."""
+
+    def get_models(self):
+        return []
+
+    def estimate_cost(self, model_id, input_tokens, output_tokens):
+        return 0.0
+
+
+class _FakeModelSpec:
+    def __init__(self, id, input_cost, output_cost):
+        self.id = id
+        self.input_cost = input_cost
+        self.output_cost = output_cost
+
+
+class _FakePricedModelRegistry:
+    """Two models with distinct per-1M-token pricing, mirroring ModelSpec's
+    shape (id/input_cost/output_cost) closely enough for _compute_savings'
+    baseline-selection (max combined cost) and estimate_cost math."""
+
+    def __init__(self, models):
+        self._models = models
+
+    def get_models(self):
+        return self._models
+
+    def estimate_cost(self, model_id, input_tokens, output_tokens):
+        spec = next(m for m in self._models if m.id == model_id)
+        return (input_tokens / 1_000_000) * spec.input_cost + (
+            output_tokens / 1_000_000
+        ) * spec.output_cost
+
+
 class _FakeLearningService:
     def __init__(self, rows):
         self._rows = rows
@@ -41,7 +78,8 @@ class _FakeLearningService:
 
 class _FakeDashboardRepository:
     def __init__(self, quality, cost_buckets, failover_data,
-                 quality_trend=None, failover_events=None, recent_requests=None, cost_by_model=None):
+                 quality_trend=None, failover_events=None, recent_requests=None, cost_by_model=None,
+                 token_totals=None):
         self._quality = quality
         self._cost_buckets = cost_buckets
         self._failover_data = failover_data
@@ -49,6 +87,7 @@ class _FakeDashboardRepository:
         self._failover_events = failover_events or []
         self._recent_requests = recent_requests or []
         self._cost_by_model = cost_by_model or {}
+        self._token_totals = token_totals or []
         self.get_quality_aggregation_calls = 0
         self.get_cost_trend_calls = 0
         self.get_failover_summary_calls = 0
@@ -85,6 +124,9 @@ class _FakeDashboardRepository:
         self.get_cost_by_model_calls += 1
         return self._cost_by_model
 
+    def get_token_totals(self, window):
+        return self._token_totals
+
 
 def _recommendation_row():
     now = datetime.now(timezone.utc)
@@ -117,6 +159,7 @@ async def test_get_overview_merges_all_six_inputs():
     service = DashboardService(
         provider_manager=provider_manager, provider_executor=provider_executor,
         learning_service=learning_service, dashboard_repository=repository,
+        model_registry=_FakeModelRegistry()
     )
 
     overview = await service.get_overview(TimeWindow(days=7))
@@ -143,6 +186,7 @@ async def test_get_overview_sets_generated_at():
         dashboard_repository=_FakeDashboardRepository(
             quality=_quality_aggregation(), cost_buckets=[], failover_data=FailoverData(request_ids=[]),
         ),
+        model_registry=_FakeModelRegistry(),
     )
 
     overview = await service.get_overview(TimeWindow(days=7))
@@ -160,6 +204,7 @@ async def test_get_overview_computes_average_cost_correctly():
     service = DashboardService(
         provider_manager=_FakeProviderManager(), provider_executor=_FakeProviderExecutor(),
         learning_service=_FakeLearningService([]), dashboard_repository=repository,
+        model_registry=_FakeModelRegistry()
     )
 
     overview = await service.get_overview(TimeWindow(days=7))
@@ -186,6 +231,7 @@ async def test_get_overview_handles_missing_circuit_state_without_raising():
     service = DashboardService(
         provider_manager=provider_manager, provider_executor=provider_executor,
         learning_service=learning_service, dashboard_repository=repository,
+        model_registry=_FakeModelRegistry()
     )
 
     overview = await service.get_overview(TimeWindow(days=7))
@@ -204,6 +250,7 @@ async def test_get_overview_calls_each_collaborator_exactly_once():
     service = DashboardService(
         provider_manager=provider_manager, provider_executor=provider_executor,
         learning_service=learning_service, dashboard_repository=repository,
+        model_registry=_FakeModelRegistry()
     )
 
     await service.get_overview(TimeWindow(days=7))
@@ -234,6 +281,7 @@ async def test_get_overview_fragment_computes_aggregate_stats():
         provider_executor=_FakeProviderExecutor(),
         learning_service=_FakeLearningService([]),
         dashboard_repository=repository,
+        model_registry=_FakeModelRegistry()
     )
 
     result = await service.get_overview_fragment(TimeWindow(days=7))
@@ -257,6 +305,7 @@ async def test_get_provider_fragment_returns_only_providers_key():
         provider_executor=_FakeProviderExecutor(),
         learning_service=_FakeLearningService([]),
         dashboard_repository=repository,
+        model_registry=_FakeModelRegistry()
     )
 
     result = await service.get_provider_fragment()
@@ -275,6 +324,7 @@ async def test_get_circuit_fragment_returns_only_circuits_key():
         provider_executor=_FakeProviderExecutor(),
         learning_service=_FakeLearningService([]),
         dashboard_repository=repository,
+        model_registry=_FakeModelRegistry()
     )
 
     result = await service.get_circuit_fragment()
@@ -294,6 +344,7 @@ async def test_get_recent_requests_fragment_delegates_to_repository():
         provider_executor=_FakeProviderExecutor(),
         learning_service=_FakeLearningService([]),
         dashboard_repository=repository,
+        model_registry=_FakeModelRegistry()
     )
 
     result = await service.get_recent_requests_fragment()
@@ -320,6 +371,7 @@ async def test_get_dashboard_page_assembles_all_sections():
         provider_executor=_FakeProviderExecutor(),
         learning_service=_FakeLearningService([]),
         dashboard_repository=repository,
+        model_registry=_FakeModelRegistry()
     )
 
     result = await service.get_dashboard_page(TimeWindow(days=7))
@@ -332,3 +384,87 @@ async def test_get_dashboard_page_assembles_all_sections():
     assert result["failover_events"] == ["failover-event"]
     assert result["requests"] == ["request-row"]
     assert result["cost_by_model"] == {"gpt-4o": 1.0}
+
+
+class _TokenTotals:
+    def __init__(self, input_tokens, output_tokens):
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+
+
+async def test_get_overview_computes_savings_against_costliest_model_by_default():
+    """_compute_savings must pick the model with the highest combined
+    input+output cost as the baseline when none is configured, then
+    compute what this traffic would have cost on that model using its
+    actual token counts -- not just re-scale the actual spend."""
+    model_registry = _FakePricedModelRegistry([
+        _FakeModelSpec(id="cheap-model", input_cost=1.0, output_cost=1.0),
+        _FakeModelSpec(id="gpt-4o", input_cost=5.0, output_cost=15.0),
+    ])
+    repository = _FakeDashboardRepository(
+        quality=_quality_aggregation(),
+        cost_buckets=[CostBucketData(date=date(2026, 7, 1), request_count=2, total_cost=0.05)],
+        failover_data=FailoverData(request_ids=[]),
+        token_totals=[_TokenTotals(1000, 500), _TokenTotals(2000, 1000)],
+    )
+    service = DashboardService(
+        provider_manager=_FakeProviderManager(), provider_executor=_FakeProviderExecutor(),
+        learning_service=_FakeLearningService([]), dashboard_repository=repository,
+        model_registry=model_registry,
+    )
+
+    overview = await service.get_overview(TimeWindow(days=7))
+
+    expected_baseline = (
+        (1000 / 1_000_000) * 5.0 + (500 / 1_000_000) * 15.0
+        + (2000 / 1_000_000) * 5.0 + (1000 / 1_000_000) * 15.0
+    )
+    assert overview.savings.baseline_model_id == "gpt-4o"
+    assert overview.savings.actual_cost == pytest.approx(0.05)
+    assert overview.savings.baseline_cost == pytest.approx(expected_baseline)
+    assert overview.savings.savings_amount == pytest.approx(expected_baseline - 0.05)
+    assert overview.savings.savings_percent == pytest.approx(
+        (expected_baseline - 0.05) / expected_baseline
+    )
+
+
+async def test_get_overview_savings_uses_configured_baseline_model_id():
+    model_registry = _FakePricedModelRegistry([
+        _FakeModelSpec(id="cheap-model", input_cost=1.0, output_cost=1.0),
+        _FakeModelSpec(id="gpt-4o", input_cost=5.0, output_cost=15.0),
+    ])
+    repository = _FakeDashboardRepository(
+        quality=_quality_aggregation(),
+        cost_buckets=[CostBucketData(date=date(2026, 7, 1), request_count=1, total_cost=0.01)],
+        failover_data=FailoverData(request_ids=[]),
+        token_totals=[_TokenTotals(1000, 1000)],
+    )
+    service = DashboardService(
+        provider_manager=_FakeProviderManager(), provider_executor=_FakeProviderExecutor(),
+        learning_service=_FakeLearningService([]), dashboard_repository=repository,
+        model_registry=model_registry, baseline_model_id="cheap-model",
+    )
+
+    overview = await service.get_overview(TimeWindow(days=7))
+
+    assert overview.savings.baseline_model_id == "cheap-model"
+    assert overview.savings.baseline_cost == pytest.approx(0.002)
+
+
+async def test_get_overview_savings_is_zero_when_no_models_registered():
+    repository = _FakeDashboardRepository(
+        quality=_quality_aggregation(),
+        cost_buckets=[CostBucketData(date=date(2026, 7, 1), request_count=1, total_cost=0.01)],
+        failover_data=FailoverData(request_ids=[]),
+    )
+    service = DashboardService(
+        provider_manager=_FakeProviderManager(), provider_executor=_FakeProviderExecutor(),
+        learning_service=_FakeLearningService([]), dashboard_repository=repository,
+        model_registry=_FakeModelRegistry(),
+    )
+
+    overview = await service.get_overview(TimeWindow(days=7))
+
+    assert overview.savings.baseline_model_id is None
+    assert overview.savings.savings_amount == pytest.approx(0.0)
+    assert overview.savings.savings_percent == pytest.approx(0.0)
