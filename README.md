@@ -13,7 +13,7 @@
 
 ### 🔗 [**Try the live demo →**](https://llm-cost-autopilot-hjoy.onrender.com/dashboard)
 
-[Why this exists](#why-this-exists) • [What it does](#what-it-does-for-you) • [See it live](#see-it-live-in-5-minutes) • [How it works](#how-it-works)
+[Why this exists](#why-this-exists) • [Proven results](#proven-results) • [What it does](#what-it-does-for-you) • [See it live](#see-it-live-in-5-minutes) • [How it works](#how-it-works)
 
 </div>
 
@@ -35,6 +35,28 @@ learns from the result.
 
 You get one endpoint to call. It gets you the receipts.
 
+## Proven results
+
+From [`benchmarks/report.md`](benchmarks/report.md) — reproducible, run it
+yourself with `python -m benchmarks.run_benchmarks`:
+
+| Metric | Result | Target |
+|---|---|---|
+| Cost savings (measured, 500-request load test) | **80.1%** vs. always using the highest-cost model | — |
+| Quality parity (*estimated* — see note below) | **93.2%** | — |
+| Routing latency (P95) | 0.12 ms | < 50 ms |
+| Classifier latency (P95) | 0.003 ms | < 10 ms |
+| Provider failover | Verified: closed → open → half-open → closed | — |
+
+> **Quality parity is estimated, not measured.** It's the ratio of each
+> selected model's configured `benchmark_score` (from `models.yaml`) to
+> the baseline model's score — deterministic and reproducible without
+> live API calls, but not the same as an LLM-judge score. The
+> **dashboard's Quality metrics** report real, measured output quality
+> from the async verification pipeline (pass rate, agreement score) on
+> live traffic. Cost savings above, by contrast, are measured from
+> actual token counts during the load test.
+
 ## What it does for you
 
 - 💸 **Cuts your AI bill automatically** — easy questions go to cheap,
@@ -49,9 +71,16 @@ You get one endpoint to call. It gets you the receipts.
 - 🛡️ **Never goes down because one provider does** — if a provider
   errors out or gets slow, it automatically fails over to another one,
   no code changes required.
-- 📊 **Shows you exactly where your money goes** — a built-in dashboard
-  breaks down cost, quality, and reliability per model, so you can see
-  the savings, not just trust they're happening.
+- 📊 **Shows you exactly where your money goes** — the dashboard leads
+  with a headline "you saved $X vs. baseline" KPI, then breaks down
+  cost, quality, and reliability per model.
+- 🧭 **Explains every routing decision** — each request's "Why this
+  model?" card shows the reasoning, plus the cost/quality delta of
+  every model it *didn't* pick.
+- 💡 **Tells you how to save even more** — recommendation cards surface
+  overspend automatically (current model → cheaper model, with quality
+  parity and estimated monthly savings), not just cost charts to
+  interpret yourself.
 - 🔑 **Add or swap providers without restarting anything** — credentials
   are managed live through the API, encrypted at rest.
 
@@ -146,16 +175,29 @@ black box.
   contained change — not a rewrite
 - Per-provider circuit breakers for automatic failover
 - Encrypted, hot-reloadable provider credentials (no restart to add a key)
-- Full test suite; every feature shipped test-first — see
+- Full test suite (470+ tests); every feature shipped test-first — see
   [`CHANGELOG.md`](CHANGELOG.md) for the complete build history across
   10 shipped phases (routing → verification → learning → resilience →
   dashboard → analytics → live provider config → provider expansion)
+- Reproducible benchmark suite ([`benchmarks/`](benchmarks/)) validating
+  latency, cost savings, and provider failover against production
+  config — not hand-written estimates
 
 ## Run the tests
 
 ```bash
 uv run pytest
 ```
+
+## Run the benchmarks
+
+```bash
+uv run python -m benchmarks.run_benchmarks
+```
+
+Writes [`benchmarks/report.md`](benchmarks/report.md) — routing/classifier
+latency, a 500-request load test, and a live circuit-breaker failover
+demonstration. No network calls, no API keys required.
 
 ## Run with Docker
 
