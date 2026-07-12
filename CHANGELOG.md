@@ -5,6 +5,28 @@ correspond to the `vX.Y.0` git tags marking the end of each phase.
 
 ## Unreleased
 
+Adds the Product Vision, User Journey, and Decision Hierarchy sections to
+`CLAUDE.md` -- shifts the project's framing from "LLM router" to "AI Cost
+Optimization platform" and establishes that features should be prioritized
+by user outcome (savings, trust, insight) over engineering interest, with
+an explicit instruction to inspect existing subsystems before adding new
+ones.
+
+Upgrades the waste-detection/cost-optimization recommendation card (Loop
+3, Phase C: the last item in the "prove it saves money -> prove trust ->
+prove it finds more savings" journey). Per the new Decision Hierarchy, this
+was inspect-first: `OverpoweredModelRule` + `RecommendationGenerator`
+already fully implement waste detection (current vs. suggested model,
+cost-per-request delta, quality parity, estimated monthly savings,
+confidence) -- the only gap was presentation. `dashboard.html`'s
+recommendation card now renders `evidence.comparison` (when present) as a
+structured layout matching the target UX (headline daily-savings figure,
+model move, request count, cost/quality deltas, monthly total) instead of
+a single prose sentence. Purely template-level -- no backend/API changes.
+Existing `test_dashboard_renders_cost_optimization_recommendation` was
+tightened to assert on the new structured fields (daily figure, request
+count) rather than just substring-matching the old sentence.
+
 Adds the routing decision card (Loop 3, Phase B: explainability, after
 Phase A's savings KPI established the product's headline value). `RoutingEngine.route`
 now computes `AlternativeModel` entries for every other eligible candidate

@@ -63,9 +63,24 @@
     {% else %}
     <div class="card-grid">
       {% for rec in recommendations %}
-      <div class="card">
+      <div class="card recommendation-card">
+        {% if rec.evidence.comparison %}
+        <div class="recommendation-savings">${{ "%.2f"|format(rec.evidence.comparison.estimated_monthly_savings / 30) }}/day</div>
+        <div class="recommendation-move">
+          {{ rec.evidence.comparison.current_model }} &rarr; {{ rec.evidence.comparison.suggested_model }}
+        </div>
+        <div class="recommendation-detail">
+          {{ rec.evidence.sample_size }} requests &middot;
+          ${{ "%.4f"|format(rec.evidence.comparison.current_cost_per_request) }} &rarr;
+          ${{ "%.4f"|format(rec.evidence.comparison.suggested_cost_per_request) }} per request &middot;
+          quality {{ "%.0f"|format(rec.evidence.comparison.current_pass_rate * 100) }}% &rarr;
+          {{ "%.0f"|format(rec.evidence.comparison.suggested_pass_rate * 100) }}%
+        </div>
+        <div class="recommendation-monthly">Estimated monthly savings: ${{ "%.2f"|format(rec.evidence.comparison.estimated_monthly_savings) }}</div>
+        {% else %}
         <strong>{{ rec.subject }}</strong><br>
         {{ rec.text }}<br>
+        {% endif %}
         Confidence: {{ "%.0f"|format(rec.evidence_confidence * 100) }}%
       </div>
       {% endfor %}

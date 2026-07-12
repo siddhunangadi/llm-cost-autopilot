@@ -24,6 +24,67 @@ Never duplicate existing code.
 
 ---
 
+# Product Vision
+
+LLM Cost Autopilot is not merely an LLM router. It is an AI Cost
+Optimization platform.
+
+Every feature should help the user answer one or more of these questions:
+
+- How much money am I spending?
+- How much money am I saving?
+- Why was this model selected?
+- Can I trust this routing decision?
+- How can I reduce my AI bill further?
+
+Features that improve engineering quality but do not improve one of these
+user outcomes should have lower priority than features that do.
+
+## User Journey
+
+1. **First visit**: "How much money did I save?" (Savings vs Baseline KPI)
+2. **Second question**: "Which model handled my traffic?" (routing distribution)
+3. **Third**: "Why did you choose that model?" (explainable routing decision card)
+4. **Fourth**: "Can I save even more?" (waste detection, optimization recommendations)
+
+This journey is the design philosophy: build in this order, not by
+engineering convenience.
+
+## Product Acceptance
+
+In addition to the engineering Acceptance Checklist below, a feature is
+not done until:
+
+- User immediately understands savings
+- Routing decisions are explainable
+- Dashboard surfaces actionable insights
+- Users can identify waste
+- Cost reduction is obvious
+- Product builds confidence
+- Product demonstrates business value
+
+## Decision Hierarchy
+
+When implementing features, answer in order and stop at the first "no":
+
+1. Does this improve user value?
+2. Does this preserve architecture?
+3. Can existing code be extended?
+4. Can configuration solve it?
+5. Is this the smallest implementation?
+6. Are tests added?
+7. Does it improve the portfolio?
+
+This hierarchy exists to prevent chasing technically interesting work that
+doesn't improve the product. Before building a new subsystem, inspect
+whether an existing one (`analysis/`, `routing/`, `learning/`,
+`verification/`, `dashboard/`) already does it -- e.g. "waste detection"
+turned out to already exist as `OverpoweredModelRule` +
+`RecommendationGenerator` in `backend/learning`, needing only a
+presentation fix, not a new service.
+
+---
+
 # Engineering Philosophy
 
 Always prefer:

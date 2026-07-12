@@ -127,3 +127,5 @@ def test_dashboard_renders_cost_optimization_recommendation(tmp_path, monkeypatc
         assert response.status_code == 200
         assert "gpt-4o-mini" in response.text
         assert "$21.00" in response.text
+        assert "$0.70/day" in response.text  # 21.00 / 30, the V1-spec headline figure
+        assert "20 requests" in response.text
