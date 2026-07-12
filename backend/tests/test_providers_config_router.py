@@ -189,3 +189,45 @@ def test_providers_page_renders(tmp_path, monkeypatch):
         assert "openai" in response.text
         assert "anthropic" in response.text
         assert "ollama" in response.text
+
+
+def _client_with_admin_key(tmp_path, monkeypatch, admin_key):
+    monkeypatch.setenv("ADMIN_API_KEY", admin_key)
+    yield from _client(tmp_path, monkeypatch)
+
+
+def test_write_routes_reject_missing_or_wrong_admin_key_when_configured(tmp_path, monkeypatch):
+    for client in _client_with_admin_key(tmp_path, monkeypatch, "correct-secret"):
+        for method, path in [
+            ("post", "/v1/providers/openai/config"),
+            ("delete", "/v1/providers/openai/config"),
+            ("post", "/v1/providers/openai/enable"),
+            ("post", "/v1/providers/openai/disable"),
+            ("post", "/v1/providers/openai/test"),
+        ]:
+            kwargs = {"json": {"api_key": "sk-test"}} if "config" in path or "test" in path else {}
+
+            no_header = client.request(method.upper(), path, **kwargs)
+            assert no_header.status_code == 401
+
+            wrong_header = client.request(
+                method.upper(), path, headers={"X-Admin-Key": "wrong"}, **kwargs
+            )
+            assert wrong_header.status_code == 401
+
+
+def test_write_routes_accept_correct_admin_key_when_configured(tmp_path, monkeypatch):
+    for client in _client_with_admin_key(tmp_path, monkeypatch, "correct-secret"):
+        response = client.post(
+            "/v1/providers/openai/config",
+            json={"api_key": "sk-test-123456"},
+            headers={"X-Admin-Key": "correct-secret"},
+        )
+        assert response.status_code == 200
+        assert response.json()["saved"] is True
+
+
+def test_read_routes_stay_open_when_admin_key_configured(tmp_path, monkeypatch):
+    for client in _client_with_admin_key(tmp_path, monkeypatch, "correct-secret"):
+        response = client.get("/v1/providers/config")
+        assert response.status_code == 200

@@ -1,6 +1,7 @@
+import secrets
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request
 
 from backend.chat.service import ChatService
 from backend.config.settings import Settings
@@ -72,6 +73,17 @@ def get_provider_factory(request: Request) -> ProviderFactory:
 
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
+
+
+def require_admin_key(request: Request, settings: SettingsDep) -> None:
+    """Gates provider-credential write routes with a shared secret. Opt-in,
+    like provider_credential_encryption_key: if ADMIN_API_KEY isn't set,
+    the route stays open (dev/test/demo default unchanged)."""
+    if not settings.admin_api_key:
+        return
+    supplied = request.headers.get("x-admin-key", "")
+    if not secrets.compare_digest(supplied, settings.admin_api_key):
+        raise HTTPException(status_code=401, detail="Invalid or missing X-Admin-Key header")
 EventBusDep = Annotated[EventBus, Depends(get_event_bus)]
 ProviderManagerDep = Annotated[ProviderManager, Depends(get_provider_manager)]
 ModelRegistryDep = Annotated[ModelRegistry, Depends(get_model_registry)]
@@ -85,3 +97,4 @@ DashboardServiceDep = Annotated[DashboardService, Depends(get_dashboard_service)
 AnalyticsServiceDep = Annotated[AnalyticsService, Depends(get_analytics_service)]
 CredentialStoreDep = Annotated[CredentialStore, Depends(get_credential_store)]
 ProviderFactoryDep = Annotated[ProviderFactory, Depends(get_provider_factory)]
+AdminKeyDep = Annotated[None, Depends(require_admin_key)]

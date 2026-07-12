@@ -103,6 +103,19 @@ dashboard/learning query but never indexed before: `request_id` on
 freshly created database; an existing on-disk SQLite file would need
 `CREATE INDEX` run manually or the file recreated.
 
+Security: `backend/api/routers/providers_config.py` write routes (save,
+delete, enable, disable, test) accepted requests with no authentication --
+anyone able to reach the API could overwrite or delete a provider's stored
+API key. Adds an opt-in shared-secret gate: when `ADMIN_API_KEY` is set,
+these 5 routes require a matching `X-Admin-Key` header (constant-time
+compared, `require_admin_key` dependency in `backend/api/dependencies.py`)
+or return 401. Follows the same opt-in convention as
+`PROVIDER_CREDENTIAL_ENCRYPTION_KEY`: unset by default so local dev, tests,
+and the public demo are unaffected; read-only routes
+(`GET /v1/providers/config`, the `/dashboard/providers` page) stay open
+since they only ever return masked keys. Not a full auth system (no
+sessions, users, or JWTs) -- scoped to the one exposed write surface.
+
 ## v0.9.1 — Provider Expansion (2026-07-04)
 
 Adds five new LLM providers -- Google Gemini, NVIDIA NIM, OpenRouter, Groq,

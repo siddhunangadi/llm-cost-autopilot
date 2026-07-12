@@ -5,7 +5,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from backend.api.dependencies import (
-    AppVersionDep, CredentialStoreDep, ProviderFactoryDep, ProviderManagerDep,
+    AdminKeyDep, AppVersionDep, CredentialStoreDep, ProviderFactoryDep, ProviderManagerDep,
 )
 from backend.api.paths import TEMPLATES_DIR
 from backend.services.credential_store import ProviderConfigStatus, ProviderCredential
@@ -55,7 +55,7 @@ def _resolve_candidate(
 async def save_provider_config(
     name: str, body: ProviderConfigRequest,
     credential_store: CredentialStoreDep, provider_manager: ProviderManagerDep,
-    provider_factory: ProviderFactoryDep,
+    provider_factory: ProviderFactoryDep, _admin: AdminKeyDep,
 ) -> ProviderConfigResult:
     _require_known(name, provider_manager.registered_names())
     candidate = _resolve_candidate(name, body, credential_store)
@@ -72,6 +72,7 @@ async def save_provider_config(
 @router.delete("/{name}/config", response_model=ProviderConfigResult)
 async def delete_provider_config(
     name: str, credential_store: CredentialStoreDep, provider_manager: ProviderManagerDep,
+    _admin: AdminKeyDep,
 ) -> ProviderConfigResult:
     _require_known(name, provider_manager.registered_names())
     credential_store.delete(name)
@@ -82,6 +83,7 @@ async def delete_provider_config(
 @router.post("/{name}/enable", response_model=ProviderConfigResult)
 async def enable_provider(
     name: str, credential_store: CredentialStoreDep, provider_manager: ProviderManagerDep,
+    _admin: AdminKeyDep,
 ) -> ProviderConfigResult:
     _require_known(name, provider_manager.registered_names())
     credential_store.set_enabled(name, True)
@@ -92,6 +94,7 @@ async def enable_provider(
 @router.post("/{name}/disable", response_model=ProviderConfigResult)
 async def disable_provider(
     name: str, credential_store: CredentialStoreDep, provider_manager: ProviderManagerDep,
+    _admin: AdminKeyDep,
 ) -> ProviderConfigResult:
     _require_known(name, provider_manager.registered_names())
     credential_store.set_enabled(name, False)
@@ -103,6 +106,7 @@ async def disable_provider(
 async def test_provider_config(
     name: str, body: ProviderConfigRequest,
     credential_store: CredentialStoreDep, provider_factory: ProviderFactoryDep,
+    _admin: AdminKeyDep,
 ) -> ProviderConfigResult:
     _require_known(name, provider_factory.registered_names())
     candidate = _resolve_candidate(name, body, credential_store)
