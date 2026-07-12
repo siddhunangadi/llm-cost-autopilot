@@ -9,6 +9,14 @@ from backend.routing.strategies import BaseRoutingStrategy
 from backend.services.model_registry import ModelRegistry
 
 
+class AlternativeModel(BaseModel):
+    model_id: str
+    estimated_cost: float
+    cost_delta: float
+    benchmark_score: float
+    quality_delta: float
+
+
 class RoutingDecision(BaseModel):
     selected_model: str
     strategy: str
@@ -17,6 +25,7 @@ class RoutingDecision(BaseModel):
     estimated_cost: float
     estimated_latency_ms: float
     reasoning: list[str]
+    alternatives: list[AlternativeModel] = []
 
 
 class NoEligibleModelError(Exception):
@@ -71,6 +80,19 @@ class RoutingEngine:
         reasoning = self._explanation_generator.generate(
             context, selected, strategy_name, classification
         )
+        alternatives = [
+            AlternativeModel(
+                model_id=candidate.id,
+                estimated_cost=(alt_cost := self._model_registry.estimate_cost(
+                    candidate.id, features.estimated_tokens, features.estimated_output_tokens
+                )),
+                cost_delta=alt_cost - estimated_cost,
+                benchmark_score=candidate.benchmark_score,
+                quality_delta=candidate.benchmark_score - selected.benchmark_score,
+            )
+            for candidate in candidates
+            if candidate.id != selected.id
+        ]
 
         return RoutingDecision(
             selected_model=selected.id,
@@ -80,4 +102,5 @@ class RoutingEngine:
             estimated_cost=estimated_cost,
             estimated_latency_ms=selected.average_latency_ms,
             reasoning=reasoning,
+            alternatives=alternatives,
         )

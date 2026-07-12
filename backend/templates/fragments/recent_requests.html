@@ -23,6 +23,38 @@
         <td>{{ r.strategy }}</td>
         <td>{{ r.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
       </tr>
+      {% if r.reasoning or r.alternatives %}
+      <tr class="decision-card-row">
+        <td colspan="8">
+          <details class="decision-card">
+            <summary>Why {{ r.model }}?</summary>
+            {% if r.reasoning %}
+            <ul class="decision-reasoning">
+              {% for line in r.reasoning %}
+              <li>{{ line }}</li>
+              {% endfor %}
+            </ul>
+            {% endif %}
+            {% if r.alternatives %}
+            <table class="decision-alternatives">
+              <thead>
+                <tr><th>Alternative</th><th>Cost Δ</th><th>Quality Δ</th></tr>
+              </thead>
+              <tbody>
+                {% for alt in r.alternatives %}
+                <tr>
+                  <td>{{ alt.model_id }}</td>
+                  <td>{{ "+" if alt.cost_delta >= 0 else "" }}${{ "%.4f"|format(alt.cost_delta) }}</td>
+                  <td>{{ "+" if alt.quality_delta >= 0 else "" }}{{ "%.1f"|format(alt.quality_delta * 100) }}%</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            {% endif %}
+          </details>
+        </td>
+      </tr>
+      {% endif %}
       {% endfor %}
     </tbody>
   </table>

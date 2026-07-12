@@ -88,6 +88,7 @@ class RoutingEventRow(Base):
     estimated_cost: Mapped[float] = mapped_column(Float, nullable=False)
     estimated_latency_ms: Mapped[float] = mapped_column(Float, nullable=False)
     reasoning: Mapped[str] = mapped_column(String, nullable=False)
+    alternatives: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, index=True
     )

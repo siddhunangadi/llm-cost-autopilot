@@ -122,6 +122,21 @@ def test_route_returns_decision_for_simple_prompt(tmp_path):
     assert len(decision.reasoning) == 3
 
 
+def test_route_includes_alternatives_for_other_eligible_candidates(tmp_path):
+    engine = _make_engine(tmp_path)
+    decision = engine.route("List three fruits.", strategy_name="cost")
+
+    assert decision.selected_model == "gpt-4o-mini"
+    assert len(decision.alternatives) == 1
+    alt = decision.alternatives[0]
+    assert alt.model_id == "gpt-4o"
+    assert alt.estimated_cost > decision.estimated_cost
+    assert alt.cost_delta == pytest.approx(alt.estimated_cost - decision.estimated_cost)
+    assert alt.cost_delta > 0
+    assert alt.benchmark_score == pytest.approx(0.93)
+    assert alt.quality_delta == pytest.approx(0.93 - 0.82)
+
+
 def test_route_complex_prompt_only_selects_high_benchmark_model(tmp_path):
     engine = _make_engine(tmp_path)
     complex_prompt = (

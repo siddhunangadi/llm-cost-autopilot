@@ -154,6 +154,7 @@ class ChatService:
                 estimated_cost=decision.estimated_cost,
                 estimated_latency_ms=decision.estimated_latency_ms,
                 reasoning=json.dumps(decision.reasoning),
+                alternatives=[a.model_dump() for a in decision.alternatives],
             ))
             session.commit()
 

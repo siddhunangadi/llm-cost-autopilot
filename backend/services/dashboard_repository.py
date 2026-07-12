@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
@@ -57,6 +58,8 @@ class RecentRequestRow:
     score: float | None
     passed: bool | None
     created_at: datetime
+    reasoning: list[str]
+    alternatives: list[dict]
 
 
 @dataclass(frozen=True)
@@ -424,5 +427,7 @@ class DashboardRepository:
                 score=verification.score if verification else None,
                 passed=verification.passed if verification else None,
                 created_at=req.created_at,
+                reasoning=json.loads(routing.reasoning) if routing else [],
+                alternatives=routing.alternatives if routing and routing.alternatives else [],
             ))
         return result

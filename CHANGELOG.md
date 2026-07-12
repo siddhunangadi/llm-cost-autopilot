@@ -5,6 +5,23 @@ correspond to the `vX.Y.0` git tags marking the end of each phase.
 
 ## Unreleased
 
+Adds the routing decision card (Loop 3, Phase B: explainability, after
+Phase A's savings KPI established the product's headline value). `RoutingEngine.route`
+now computes `AlternativeModel` entries for every other eligible candidate
+the policy considered -- estimated cost (via the same
+`ModelRegistry.estimate_cost` call and token counts already used for the
+selected model, no duplicated pricing math), cost delta vs. the selected
+model, and quality delta (`benchmark_score` difference). Persisted on
+`RoutingEventRow.alternatives` (new nullable JSON column) alongside the
+existing `reasoning` field, and surfaced end-to-end:
+`DashboardRepository.get_recent_requests` now returns `reasoning` and
+`alternatives` on `RecentRequestRow`, rendered as an expandable native
+`<details>` "Why {model}?" card under each row in the Recent Requests
+table -- reasoning bullets plus an alternatives table showing cost/quality
+deltas for models the router considered but didn't pick. Covered by a new
+routing-engine test asserting alternatives are computed correctly for a
+2-model eligible set.
+
 Adds the "Savings vs Baseline" headline KPI (Loop 3, Phase A: the product's
 core value proposition -- "how much is this actually saving me?" -- surfaced
 before routing-decision explainability or waste insights, per the reasoning
