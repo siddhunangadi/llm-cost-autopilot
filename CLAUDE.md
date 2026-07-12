@@ -476,6 +476,34 @@ A feature is NOT complete until:
 
 ---
 
+# Portfolio Completion
+
+The project is complete only when:
+
+✓ README demonstrates business impact (numbers, not just architecture)
+
+✓ Architecture diagrams exist
+
+✓ Benchmarks validate performance claims (routing latency, classifier
+  latency, verification latency, throughput -- against the targets in
+  Performance Targets below, with evidence, not just an assertion)
+
+✓ Load-test report exists (savings %, quality parity %, escalation rate,
+  routing distribution over a batch of prompts)
+
+✓ Provider failover is demonstrated, not just implemented (simulate a
+  failure, show recovery, save the result)
+
+✓ Screenshots show the UI (dashboard, decision cards, recommendation cards)
+
+✓ Case study explains design decisions and tradeoffs
+
+A technically complete system without documentation and evidence is not a
+finished portfolio project. Once engineering and product acceptance criteria
+are met, further effort belongs here, not in new features.
+
+---
+
 # Autonomous Engineering Workflow
 
 For every task execute the following loop.
