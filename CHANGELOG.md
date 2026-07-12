@@ -5,6 +5,10 @@ correspond to the `vX.Y.0` git tags marking the end of each phase.
 
 ## Unreleased
 
+Fixes `GET /` returning `{"detail":"Not Found"}` on the live demo -- no
+route existed at the bare root, only `/dashboard` and the `/v1/*` API. Adds
+a redirect from `/` to `/dashboard` so the root URL works.
+
 Adds `benchmarks/run_benchmarks.py` (Phase A: Production Validation, per
 CLAUDE.md's Portfolio Completion criteria -- prove documented performance
 claims with evidence instead of assertion). Reuses the real

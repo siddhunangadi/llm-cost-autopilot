@@ -2,6 +2,7 @@ import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.analysis.prompt_analyzer import PromptAnalyzer
@@ -238,6 +239,11 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(title="LLM Cost Autopilot", version=APP_VERSION, lifespan=lifespan)
+
+    @app.get("/", include_in_schema=False)
+    async def root() -> RedirectResponse:
+        return RedirectResponse(url="/dashboard")
+
     app.include_router(health_router, prefix="/v1")
     app.include_router(models_router, prefix="/v1")
     app.include_router(chat_router, prefix="/v1")

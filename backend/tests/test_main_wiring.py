@@ -16,3 +16,14 @@ def test_app_boots_and_lists_all_eight_providers(tmp_path, monkeypatch):
             "openai", "anthropic", "ollama",
             "gemini", "nvidia_nim", "openrouter", "groq", "mistral",
         }
+
+
+def test_root_redirects_to_dashboard(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/wiring.db")
+    monkeypatch.setenv("PROVIDER_CREDENTIAL_ENCRYPTION_KEY", "5uL8vG3sVXqQeQ6uKX3nQeYV1o6z5w4C3hK1s0mE6yA=")
+    app = create_app()
+    with TestClient(app) as client:
+        response = client.get("/", follow_redirects=False)
+
+        assert response.status_code == 307
+        assert response.headers["location"] == "/dashboard"
